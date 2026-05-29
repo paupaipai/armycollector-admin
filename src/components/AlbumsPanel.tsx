@@ -15,7 +15,7 @@ const emptyForm = {
   release_year: '',
   release_date: '',
   color: '#A6A6A6',
-  cover_image_url: '',
+  cover_image_url: 'korean-albums/orul82/cover.png',
   sort_order: '',
   is_active: true,
 };

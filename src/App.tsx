@@ -38,8 +38,8 @@ export default function App() {
     if (!cardsRes.error) setCards(cardsRes.data || []);
   }
 
-  async function checkSession() {
-    setLoading(true);
+  async function checkSession(showSpinner = true) {
+    if (showSpinner) setLoading(true);
     setAdminError(null);
 
     try {
@@ -77,14 +77,22 @@ export default function App() {
       setAdminError(err instanceof Error ? err.message : 'Error de conexión con Supabase.');
       setIsAdmin(false);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }
 
   useEffect(() => {
     checkSession();
     const { data } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') checkSession();
+      if (event === 'SIGNED_IN') checkSession(false);
+      if (event === 'SIGNED_OUT') {
+        setSessionEmail(null);
+        setIsAdmin(false);
+        setAlbums([]);
+        setVersions([]);
+        setCategories([]);
+        setCards([]);
+      }
     });
     return () => data.subscription.unsubscribe();
   }, []);
@@ -123,7 +131,7 @@ export default function App() {
       <header className="sticky top-0 z-10 border-b border-violet-300/20 bg-[#210c36]/80 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center gap-3 justify-between">
           <div>
-            <h1 className="text-2xl font-black text-white">K-Collector Admin</h1>
+            <h1 className="text-2xl font-black text-white">Army-Collector Admin</h1>
             <p className="text-sm text-violet-100/80">{sessionEmail}</p>
           </div>
           <nav className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
@@ -141,12 +149,12 @@ export default function App() {
       </header>
 
       <section className="max-w-7xl mx-auto p-4 md:p-5">
-        {tab === 'albums' && <AlbumsPanel albums={albums} onChanged={loadData} />}
-        {tab === 'versions' && <VersionsPanel albums={albums} versions={versions} onChanged={loadData} />}
-        {tab === 'categories' && <CategoriesPanel categories={categories} onChanged={loadData} />}
-        {tab === 'cards' && <CardsPanel albums={albums} versions={versions} categories={categories} cards={cards} onChanged={loadData} />}
-        {tab === 'bulk' && <BulkCardsPanel albums={albums} versions={versions} categories={categories} importedFiles={importedCropFiles} />}
-        {tab === 'cropper' && <CropperPanel onSendToBulk={(files) => { setImportedCropFiles(files); setTab('bulk'); }} />}
+        <div className={tab !== 'albums' ? 'hidden' : ''}><AlbumsPanel albums={albums} onChanged={loadData} /></div>
+        <div className={tab !== 'versions' ? 'hidden' : ''}><VersionsPanel albums={albums} versions={versions} onChanged={loadData} /></div>
+        <div className={tab !== 'categories' ? 'hidden' : ''}><CategoriesPanel categories={categories} onChanged={loadData} /></div>
+        <div className={tab !== 'cards' ? 'hidden' : ''}><CardsPanel albums={albums} versions={versions} categories={categories} cards={cards} onChanged={loadData} /></div>
+        <div className={tab !== 'bulk' ? 'hidden' : ''}><BulkCardsPanel albums={albums} versions={versions} categories={categories} importedFiles={importedCropFiles} /></div>
+        <div className={tab !== 'cropper' ? 'hidden' : ''}><CropperPanel onSendToBulk={(files) => { setImportedCropFiles(files); setTab('bulk'); }} /></div>
       </section>
     </main>
   );

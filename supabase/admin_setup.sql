@@ -5,6 +5,17 @@
 ALTER TABLE public.user_profiles
 ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false;
 
+-- Permite que cada usuario lea su propio perfil.
+-- Sin esto, la policy de escritura en albums/cards falla porque
+-- la subquery EXISTS (SELECT FROM user_profiles) no puede leer la tabla.
+ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "users can read own profile" ON public.user_profiles;
+CREATE POLICY "users can read own profile"
+ON public.user_profiles FOR SELECT
+TO authenticated
+USING (id = auth.uid());
+
 -- 2) Marca tu usuario como admin.
 -- Reemplaza el correo por tu email de login de Supabase Auth.
 UPDATE public.user_profiles up

@@ -38,7 +38,7 @@ export function Login() {
             <LockKeyhole />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">K-Collector Admin</h1>
+            <h1 className="text-2xl font-bold text-white">Army-Collector Admin</h1>
             <p className="text-sm text-violet-100/75">Mantenedor privado para Supabase</p>
           </div>
         </div>
