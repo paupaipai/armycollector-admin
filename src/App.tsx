@@ -83,7 +83,9 @@ export default function App() {
 
   useEffect(() => {
     checkSession();
-    const { data } = supabase.auth.onAuthStateChange(() => checkSession());
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') checkSession();
+    });
     return () => data.subscription.unsubscribe();
   }, []);
 
