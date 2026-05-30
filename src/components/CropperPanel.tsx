@@ -30,7 +30,7 @@ export function CropperPanel({ onSendToBulk }: Props) {
   const [selection, setSelection] = useState<Rect | null>(null);
   const [detectedBoxes, setDetectedBoxes] = useState<DetectedRect[]>([]);
   const [crops, setCrops] = useState<CropItem[]>([]);
-  const [padding, setPadding] = useState(8);
+  const [padding, setPadding] = useState(2);
   const [minArea, setMinArea] = useState(20000);
   const [whiteThreshold, setWhiteThreshold] = useState(245);
   const [status, setStatus] = useState('Esperando imagen.');

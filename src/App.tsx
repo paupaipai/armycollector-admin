@@ -52,9 +52,8 @@ export default function App() {
         return;
       }
 
-      setSessionEmail(user.email || null);
-
       if (import.meta.env.VITE_SKIP_ADMIN_CHECK === 'true') {
+        setSessionEmail(user.email || null);
         setIsAdmin(true);
         await loadData();
         return;
@@ -65,6 +64,8 @@ export default function App() {
         .select('is_admin')
         .eq('id', user.id)
         .maybeSingle();
+
+      setSessionEmail(user.email || null);
 
       if (error) {
         setAdminError(`No pude validar is_admin en user_profiles: ${error.message}`);
@@ -138,9 +139,9 @@ export default function App() {
             <TabButton active={tab === 'albums'} onClick={() => setTab('albums')} icon={<Database size={16} />} label="Álbumes" />
             <TabButton active={tab === 'versions'} onClick={() => setTab('versions')} icon={<Layers3 size={16} />} label="Versiones" />
             <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={<Tags size={16} />} label="Categorías" />
-            <TabButton active={tab === 'cards'} onClick={() => setTab('cards')} icon={<CreditCard size={16} />} label="Cards" />
-            <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')} icon={<Images size={16} />} label="Carga masiva" />
             <TabButton active={tab === 'cropper'} onClick={() => setTab('cropper')} icon={<Scissors size={16} />} label="Cropper" />
+            <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')} icon={<Images size={16} />} label="Carga masiva" />
+            <TabButton active={tab === 'cards'} onClick={() => setTab('cards')} icon={<CreditCard size={16} />} label="Cards" />
             <button onClick={signOut} className="shrink-0 rounded-2xl border border-violet-200/20 bg-white/10 px-4 py-2 text-sm font-bold text-violet-100 flex items-center gap-2 hover:bg-white/15">
               <LogOut size={16} /> Salir
             </button>

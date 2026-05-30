@@ -102,7 +102,7 @@ export function CategoriesPanel({ categories, onChanged }: Props) {
           <textarea className="input min-h-28" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Descripción opcional" />
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Color" value={form.color} onChange={(v) => set('color', v)} type="color" />
+          <ColorField label="Color" value={form.color} onChange={(v) => set('color', v)} />
           <Field label="Orden" value={form.sort_order} onChange={(v) => set('sort_order', v)} type="number" />
         </div>
 
@@ -152,5 +152,31 @@ function Field({ label, value, onChange, placeholder, type = 'text', required = 
       <span className="label">{label}</span>
       <input className="input" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} type={type} required={required} />
     </label>
+  );
+}
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="block">
+      <span className="label">{label}</span>
+      <label className="input mt-1 flex items-center gap-3 cursor-pointer p-2">
+        <span className="relative h-9 w-9 shrink-0 rounded-xl border-2 border-white/20 overflow-hidden shadow-inner" style={{ backgroundColor: value }}>
+          <input
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+          />
+        </span>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 bg-transparent outline-none text-violet-50 font-mono text-sm uppercase"
+          maxLength={7}
+          placeholder="#E040A0"
+        />
+      </label>
+    </div>
   );
 }

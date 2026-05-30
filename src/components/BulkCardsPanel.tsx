@@ -1,7 +1,8 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { ImagePlus, UploadCloud } from 'lucide-react';
-import { STORAGE_BUCKET, supabase } from '../lib/supabase';
+import { STORAGE_BUCKET, supabase, supabaseAdmin } from '../lib/supabase';
 import { BTS_GROUP, BTS_MEMBERS } from '../data/members';
+import { SaveToast } from './SaveToast';
 import type { Album, AlbumVersion, CardCategory, CardInsert, ImportedCropFile } from '../types';
 
 type Props = {
@@ -28,7 +29,8 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
   const [notes, setNotes] = useState('');
   const [files, setFiles] = useState<FileMap>({});
   const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
+  const closeToast = useCallback(() => setToastStatus(null), []);
 
   useEffect(() => {
     if (!importedFiles.length) return;
@@ -86,7 +88,7 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
       const file = files[fileName.toLowerCase()];
       if (!file) continue;
 
-      const { error } = await supabase.storage
+      const { error } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)
         .upload(row.image_path, file, { cacheControl: '3600', upsert: true });
 
@@ -103,7 +105,7 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
       return;
     }
 
-    setBusy(true);
+    setToastStatus('saving');
     try {
       await uploadImages();
 
@@ -112,15 +114,17 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
         .upsert(generatedRows, { onConflict: 'code' });
 
       if (error) throw error;
+      setToastStatus('success');
       setMessage(`Listo: ${generatedRows.length} cards guardadas. Las imágenes seleccionadas también se subieron.`);
     } catch (err) {
+      setToastStatus(null);
       setMessage(err instanceof Error ? err.message : 'Error desconocido');
-    } finally {
-      setBusy(false);
     }
   }
 
   return (
+    <>
+    <SaveToast status={toastStatus} onClose={closeToast} message={toastStatus === 'success' ? `¡${generatedRows.length} cards guardadas!` : undefined} />
     <section className="grid xl:grid-cols-[420px_1fr] gap-6">
       <form onSubmit={submit} className="admin-card p-6 space-y-4">
         <h2 className="text-xl font-black text-white">Carga masiva de photocards</h2>
@@ -165,9 +169,8 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
           <input className="hidden" type="file" accept="image/*" multiple onChange={onFiles} />
         </label>
 
-        <button disabled={busy} className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-60">
-          <UploadCloud size={18} />
-          {busy ? 'Guardando...' : 'Subir imágenes y guardar cards'}
+        <button disabled={toastStatus === 'saving'} className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-60">
+          <UploadCloud size={18} /> Subir imágenes y guardar cards
         </button>
 
         {message && <p className="text-sm text-violet-100/80">{message}</p>}
@@ -201,6 +204,7 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
         </div>
       </div>
     </section>
+    </>
   );
 }
 
