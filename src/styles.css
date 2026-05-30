@@ -40,7 +40,6 @@ body {
 
   .admin-table {
     @apply w-full text-sm text-violet-50;
-    min-width: max-content;
   }
 
   .admin-table thead {
@@ -49,7 +48,7 @@ body {
 
   .admin-table th,
   .admin-table td {
-    @apply whitespace-nowrap border-b border-violet-200/10 px-4 py-3 align-middle;
+    @apply border-b border-violet-200/10 px-4 py-3 align-middle;
   }
 
   .admin-table tbody tr {

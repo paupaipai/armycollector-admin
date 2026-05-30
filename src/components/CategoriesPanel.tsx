@@ -1,6 +1,7 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useMemo, useState } from 'react';
 import { Pencil, RotateCcw, Save } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { SaveToast } from './SaveToast';
 import type { CardCategory } from '../types';
 
 type Props = {
@@ -21,6 +22,8 @@ export function CategoriesPanel({ categories, onChanged }: Props) {
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
+  const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
+  const closeToast = useCallback(() => setToastStatus(null), []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -66,18 +69,22 @@ export function CategoriesPanel({ categories, onChanged }: Props) {
       ? supabase.from('card_categories').update(payload).eq('id', editingId)
       : supabase.from('card_categories').insert(payload);
 
+    setToastStatus('saving');
     const { error } = await query;
     if (error) {
+      setToastStatus(null);
       setMessage(error.message);
       return;
     }
 
-    setMessage(editingId ? 'Categoría actualizada.' : 'Categoría creada.');
-    reset();
     await onChanged();
+    setToastStatus('success');
+    reset();
   }
 
   return (
+    <>
+    <SaveToast status={toastStatus} onClose={closeToast} />
     <section className="grid lg:grid-cols-[440px_1fr] gap-6">
       <form onSubmit={submit} className="admin-card p-6 space-y-4">
         <div className="flex items-center justify-between gap-3">
@@ -108,7 +115,7 @@ export function CategoriesPanel({ categories, onChanged }: Props) {
           <h2 className="text-xl font-black text-white">Categorías existentes</h2>
           <input className="input max-w-sm" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar categoría..." />
         </div>
-        <div className="overflow-auto rounded-3xl border border-violet-200/10">
+        <div className="rounded-3xl border border-violet-200/10">
           <table className="admin-table">
             <thead><tr><th>ID</th><th>Nombre</th><th>Short</th><th>Color</th><th>Orden</th><th></th></tr></thead>
             <tbody>
@@ -128,6 +135,7 @@ export function CategoriesPanel({ categories, onChanged }: Props) {
         {filtered.length === 0 && <p className="text-violet-100/70 mt-4">No hay resultados.</p>}
       </div>
     </section>
+    </>
   );
 }
 

@@ -1,6 +1,7 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useMemo, useState } from 'react';
 import { Pencil, Plus, RotateCcw, Save } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabaseAdmin as supabase } from '../lib/supabase';
+import { SaveToast } from './SaveToast';
 import type { Album } from '../types';
 
 type Props = {
@@ -15,16 +16,26 @@ const emptyForm = {
   release_year: '',
   release_date: '',
   color: '#A6A6A6',
-  cover_image_url: 'korean-albums/orul82/cover.png',
+  cover_category: 'korean-albums',
+  cover_image_url: '',
   sort_order: '',
   is_active: true,
 };
+
+function buildCoverPath(category: string, shortName: string) {
+  const cat = category.trim();
+  const slug = shortName.trim().toLowerCase();
+  if (!cat || !slug) return '';
+  return `${cat}/${slug}/cover.png`;
+}
 
 export function AlbumsPanel({ albums, onChanged }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
+  const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
+  const closeToast = useCallback(() => setToastStatus(null), []);
 
   const filteredAlbums = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -33,7 +44,13 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
   }, [albums, search]);
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'cover_category' || key === 'short_name') {
+        next.cover_image_url = buildCoverPath(next.cover_category, next.short_name);
+      }
+      return next;
+    });
   }
 
   function reset() {
@@ -44,6 +61,9 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
 
   function edit(album: Album) {
     setEditingId(album.id);
+    const existingPath = album.cover_image_url || '';
+    const parts = existingPath.split('/');
+    const cover_category = parts.length >= 3 ? parts[0] : 'korean-albums';
     setForm({
       name: album.name || '',
       artist: album.artist || 'BTS',
@@ -51,7 +71,8 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
       release_year: album.release_year ? String(album.release_year) : '',
       release_date: album.release_date || '',
       color: album.color || '#A6A6A6',
-      cover_image_url: album.cover_image_url || '',
+      cover_category,
+      cover_image_url: existingPath,
       sort_order: album.sort_order ? String(album.sort_order) : '',
       is_active: Boolean(album.is_active),
     });
@@ -78,18 +99,22 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
       ? supabase.from('albums').update(payload).eq('id', editingId)
       : supabase.from('albums').insert(payload);
 
+    setToastStatus('saving');
     const { error } = await query;
     if (error) {
+      setToastStatus(null);
       setMessage(error.message);
       return;
     }
 
-    setMessage(editingId ? 'Álbum actualizado.' : 'Álbum creado.');
-    reset();
     await onChanged();
+    setToastStatus('success');
+    reset();
   }
 
   return (
+    <>
+    <SaveToast status={toastStatus} onClose={closeToast} />
     <section className="grid lg:grid-cols-[440px_1fr] gap-6">
       <form onSubmit={submit} className="admin-card p-6 space-y-4">
         <div className="flex items-center justify-between gap-3">
@@ -110,10 +135,16 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
           <Field label="Fecha" value={form.release_date} onChange={(v) => set('release_date', v)} type="date" />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Color" value={form.color} onChange={(v) => set('color', v)} type="color" />
+          <ColorField label="Color" value={form.color} onChange={(v) => set('color', v)} />
           <Field label="Orden" value={form.sort_order} onChange={(v) => set('sort_order', v)} type="number" />
         </div>
-        <Field label="Cover image path" value={form.cover_image_url} onChange={(v) => set('cover_image_url', v)} placeholder="korean-albums/orul82/cover.png" />
+        <Field label="Categoría imagen" value={form.cover_category} onChange={(v) => set('cover_category', v)} placeholder="korean-albums" />
+        <label className="block">
+          <span className="label">Cover image path</span>
+          <div className="input mt-1 text-violet-200/60 select-all font-mono text-sm">
+            {form.cover_image_url || <span className="text-violet-200/30">se genera automáticamente</span>}
+          </div>
+        </label>
 
         <label className="flex items-center gap-2 text-sm font-bold text-violet-50">
           <input type="checkbox" checked={form.is_active} onChange={(e) => set('is_active', e.target.checked)} />
@@ -129,7 +160,7 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
           <h2 className="text-xl font-black text-white">Álbumes existentes</h2>
           <input className="input max-w-sm" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar álbum..." />
         </div>
-        <div className="overflow-auto rounded-3xl border border-violet-200/10">
+        <div className="rounded-3xl border border-violet-200/10">
           <table className="admin-table">
             <thead>
               <tr>
@@ -154,6 +185,7 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
         {filteredAlbums.length === 0 && <p className="text-violet-100/70 mt-4">No hay resultados.</p>}
       </div>
     </section>
+    </>
   );
 }
 
@@ -170,5 +202,31 @@ function Field({ label, value, onChange, placeholder, type = 'text', required = 
       <span className="label">{label}</span>
       <input className="input" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} type={type} required={required} />
     </label>
+  );
+}
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="block">
+      <span className="label">{label}</span>
+      <label className="input mt-1 flex items-center gap-3 cursor-pointer p-2">
+        <span className="relative h-9 w-9 shrink-0 rounded-xl border-2 border-white/20 overflow-hidden shadow-inner" style={{ backgroundColor: value }}>
+          <input
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+          />
+        </span>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 bg-transparent outline-none text-violet-50 font-mono text-sm uppercase"
+          maxLength={7}
+          placeholder="#A6A6A6"
+        />
+      </label>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
-import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useMemo, useState } from 'react';
 import { ImagePlus, Pencil, RotateCcw, Save } from 'lucide-react';
 import { STORAGE_BUCKET, supabase } from '../lib/supabase';
+import { SaveToast } from './SaveToast';
 import { BTS_GROUP, BTS_MEMBERS } from '../data/members';
 import type { Album, AlbumVersion, Card, CardCategory } from '../types';
 
@@ -39,7 +40,8 @@ export function CardsPanel({ albums, versions, categories, cards, onChanged }: P
   const [albumFilter, setAlbumFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
+  const closeToast = useCallback(() => setToastStatus(null), []);
 
   const albumVersions = useMemo(() => versions.filter((v) => String(v.album_id) === form.album_id), [versions, form.album_id]);
 
@@ -143,7 +145,7 @@ export function CardsPanel({ albums, versions, categories, cards, onChanged }: P
       is_visible: form.is_visible,
     };
 
-    setBusy(true);
+    setToastStatus('saving');
     try {
       await uploadImageIfNeeded(payload.image_path);
       const query = editingId
@@ -151,17 +153,18 @@ export function CardsPanel({ albums, versions, categories, cards, onChanged }: P
         : supabase.from('cards').insert(payload);
       const { error } = await query;
       if (error) throw error;
-      setMessage(editingId ? 'Card actualizada.' : 'Card creada.');
-      reset();
       await onChanged();
+      setToastStatus('success');
+      reset();
     } catch (err) {
+      setToastStatus(null);
       setMessage(err instanceof Error ? err.message : 'Error desconocido');
-    } finally {
-      setBusy(false);
     }
   }
 
   return (
+    <>
+    <SaveToast status={toastStatus} onClose={closeToast} />
     <section className="grid xl:grid-cols-[460px_1fr] gap-6">
       <form onSubmit={submit} className="admin-card p-6 space-y-4">
         <div className="flex items-center justify-between gap-3">
@@ -225,7 +228,7 @@ export function CardsPanel({ albums, versions, categories, cards, onChanged }: P
           {file && <p className="text-xs text-violet-100 mt-2">Archivo: {file.name}</p>}
         </label>
 
-        <button disabled={busy} className="btn-primary w-full disabled:opacity-50"><Save size={18} /> {busy ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear card'}</button>
+        <button disabled={toastStatus === 'saving'} className="btn-primary w-full disabled:opacity-50"><Save size={18} /> {editingId ? 'Guardar cambios' : 'Crear card'}</button>
         {message && <p className="text-sm text-violet-100/80">{message}</p>}
       </form>
 
@@ -245,7 +248,7 @@ export function CardsPanel({ albums, versions, categories, cards, onChanged }: P
           </div>
           <p className="text-xs text-violet-100/65">Mostrando {filtered.length} de {cards.length} cards.</p>
         </div>
-        <div className="overflow-auto rounded-3xl border border-violet-200/10 max-h-[75vh]">
+        <div className="rounded-3xl border border-violet-200/10">
           <table className="admin-table">
             <thead><tr><th>ID</th><th>Álbum</th><th>Versión</th><th>Categoría</th><th>Miembro</th><th>Card</th><th>Code</th><th>Visible</th><th></th></tr></thead>
             <tbody>
@@ -272,6 +275,7 @@ export function CardsPanel({ albums, versions, categories, cards, onChanged }: P
         </div>
       </div>
     </section>
+    </>
   );
 }
 

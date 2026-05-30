@@ -1,6 +1,7 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useMemo, useState } from 'react';
 import { Pencil, RotateCcw, Save } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { SaveToast } from './SaveToast';
 import type { Album, AlbumVersion } from '../types';
 
 type VersionRow = { album_id: number; name: string; short_name: string; sort_order: number };
@@ -17,6 +18,8 @@ export function VersionsPanel({ albums, versions, onChanged }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ album_id: '', name: '', short_name: '', sort_order: '' });
   const [message, setMessage] = useState<string | null>(null);
+  const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
+  const closeToast = useCallback(() => setToastStatus(null), []);
 
   const selectedVersions = useMemo(() => versions.filter((v) => !albumId || String(v.album_id) === albumId), [versions, albumId]);
 
@@ -55,14 +58,16 @@ export function VersionsPanel({ albums, versions, onChanged }: Props) {
       return;
     }
 
+    setToastStatus('saving');
     const { error } = await supabase.from('album_versions').insert(rows);
     if (error) {
+      setToastStatus(null);
       setMessage(error.message);
       return;
     }
 
-    setMessage('Versiones creadas.');
     await onChanged();
+    setToastStatus('success');
   }
 
   async function submitEdit(e: FormEvent) {
@@ -77,17 +82,21 @@ export function VersionsPanel({ albums, versions, onChanged }: Props) {
       sort_order: editForm.sort_order ? Number(editForm.sort_order) : null,
     };
 
+    setToastStatus('saving');
     const { error } = await supabase.from('album_versions').update(payload).eq('id', editingId);
     if (error) {
+      setToastStatus(null);
       setMessage(error.message);
       return;
     }
-    setMessage('Versión actualizada.');
-    resetEdit();
     await onChanged();
+    setToastStatus('success');
+    resetEdit();
   }
 
   return (
+    <>
+    <SaveToast status={toastStatus} onClose={closeToast} />
     <section className="grid xl:grid-cols-[420px_420px_1fr] gap-6">
       <form onSubmit={submitBulk} className="admin-card p-6 space-y-4">
         <h2 className="text-xl font-black text-white">Crear versiones</h2>
@@ -134,7 +143,7 @@ export function VersionsPanel({ albums, versions, onChanged }: Props) {
 
       <div className="admin-card p-6 min-w-0">
         <h2 className="text-xl font-black text-white mb-4">Versiones</h2>
-        <div className="overflow-auto rounded-3xl border border-violet-200/10">
+        <div className="rounded-3xl border border-violet-200/10">
           <table className="admin-table">
             <thead><tr><th>ID</th><th>Álbum</th><th>Versión</th><th>Short</th><th>Orden</th><th></th></tr></thead>
             <tbody>
@@ -156,6 +165,7 @@ export function VersionsPanel({ albums, versions, onChanged }: Props) {
         </div>
       </div>
     </section>
+    </>
   );
 }
 

@@ -16,7 +16,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [tab, setTab] = useState<Tab>('bulk');
+  const [tab, setTab] = useState<Tab>('albums');
   const [importedCropFiles, setImportedCropFiles] = useState<ImportedCropFile[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
   const [versions, setVersions] = useState<AlbumVersion[]>([]);
@@ -135,12 +135,12 @@ export default function App() {
             <p className="text-sm text-violet-100/80">{sessionEmail}</p>
           </div>
           <nav className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
-            <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')} icon={<Images size={16} />} label="Carga masiva" />
-            <TabButton active={tab === 'cropper'} onClick={() => setTab('cropper')} icon={<Scissors size={16} />} label="Cropper" />
             <TabButton active={tab === 'albums'} onClick={() => setTab('albums')} icon={<Database size={16} />} label="Álbumes" />
             <TabButton active={tab === 'versions'} onClick={() => setTab('versions')} icon={<Layers3 size={16} />} label="Versiones" />
             <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={<Tags size={16} />} label="Categorías" />
             <TabButton active={tab === 'cards'} onClick={() => setTab('cards')} icon={<CreditCard size={16} />} label="Cards" />
+            <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')} icon={<Images size={16} />} label="Carga masiva" />
+            <TabButton active={tab === 'cropper'} onClick={() => setTab('cropper')} icon={<Scissors size={16} />} label="Cropper" />
             <button onClick={signOut} className="shrink-0 rounded-2xl border border-violet-200/20 bg-white/10 px-4 py-2 text-sm font-bold text-violet-100 flex items-center gap-2 hover:bg-white/15">
               <LogOut size={16} /> Salir
             </button>
@@ -148,7 +148,7 @@ export default function App() {
         </div>
       </header>
 
-      <section className="max-w-7xl mx-auto p-4 md:p-5">
+      <section className="w-full p-4 md:p-6">
         <div className={tab !== 'albums' ? 'hidden' : ''}><AlbumsPanel albums={albums} onChanged={loadData} /></div>
         <div className={tab !== 'versions' ? 'hidden' : ''}><VersionsPanel albums={albums} versions={versions} onChanged={loadData} /></div>
         <div className={tab !== 'categories' ? 'hidden' : ''}><CategoriesPanel categories={categories} onChanged={loadData} /></div>
