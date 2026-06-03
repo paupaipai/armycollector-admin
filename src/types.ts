@@ -10,6 +10,8 @@ export type Album = {
   sort_order: number | null;
   is_active: boolean | null;
   created_at?: string | null;
+  collection_type_id?: number | null;
+  era_id?: number | null;
 };
 
 export type AlbumVersion = {
@@ -48,6 +50,7 @@ export type Card = {
   notes: string | null;
   created_at?: string | null;
   is_visible: boolean | null;
+  card_set_id?: number | null;
 };
 
 export type CardInsert = {
@@ -67,9 +70,49 @@ export type CardInsert = {
   release_date: string | null;
   notes: string | null;
   is_visible: boolean;
+  card_set_id: number | null;
 };
 
 export type ImportedCropFile = {
   fileName: string;
   file: File;
+};
+
+export type CollectionType = {
+  id: number;
+  name: string;
+  short_name: string;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at?: string;
+};
+
+export type AlbumEra = {
+  id: number;
+  collection_type_id: number;
+  name: string;
+  short_name: string;
+  description: string | null;
+  color: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at?: string;
+};
+
+export type CardSet = {
+  id: number;
+  album_id: number;
+  version_id: number | null;
+  category_id: number | null;
+  name: string;
+  short_name: string;
+  description: string | null;
+  retailer: string | null;
+  round: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at?: string;
 };

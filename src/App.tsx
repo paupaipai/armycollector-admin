@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Database, Images, Layers3, Scissors, Tags, CreditCard } from 'lucide-react';
-import { supabase } from './lib/supabase';
+import { LogOut, Database, Images, Layers3, Scissors, Tags, CreditCard, BookOpen, CalendarDays, Package } from 'lucide-react';
+import { supabase, supabaseAdmin } from './lib/supabase';
 import { Login } from './components/Login';
 import { AlbumsPanel } from './components/AlbumsPanel';
 import { VersionsPanel } from './components/VersionsPanel';
@@ -8,9 +8,12 @@ import { BulkCardsPanel } from './components/BulkCardsPanel';
 import { CropperPanel } from './components/CropperPanel';
 import { CategoriesPanel } from './components/CategoriesPanel';
 import { CardsPanel } from './components/CardsPanel';
-import type { Album, AlbumVersion, CardCategory, Card, ImportedCropFile } from './types';
+import { CollectionTypesPanel } from './components/CollectionTypesPanel';
+import { AlbumErasPanel } from './components/AlbumErasPanel';
+import { CardSetsPanel } from './components/CardSetsPanel';
+import type { Album, AlbumVersion, CardCategory, Card, ImportedCropFile, CollectionType, AlbumEra, CardSet } from './types';
 
-type Tab = 'bulk' | 'cropper' | 'albums' | 'versions' | 'categories' | 'cards';
+type Tab = 'bulk' | 'cropper' | 'albums' | 'versions' | 'categories' | 'cards' | 'collection-types' | 'album-eras' | 'card-sets';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -22,20 +25,44 @@ export default function App() {
   const [versions, setVersions] = useState<AlbumVersion[]>([]);
   const [categories, setCategories] = useState<CardCategory[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
+  const [collectionTypes, setCollectionTypes] = useState<CollectionType[]>([]);
+  const [albumEras, setAlbumEras] = useState<AlbumEra[]>([]);
+  const [cardSets, setCardSets] = useState<CardSet[]>([]);
   const [adminError, setAdminError] = useState<string | null>(null);
 
   async function loadData() {
-    const [albumsRes, versionsRes, categoriesRes, cardsRes] = await Promise.all([
+    console.log('[loadData] iniciando...');
+    const [albumsRes, versionsRes, categoriesRes, cardsRes, collTypesRes, erasRes, setsRes] = await Promise.all([
       supabase.from('albums').select('*').order('sort_order', { ascending: true }).order('name'),
       supabase.from('album_versions').select('*').order('album_id', { ascending: true }).order('sort_order', { ascending: true }),
       supabase.from('card_categories').select('*').order('sort_order', { ascending: true }),
       supabase.from('cards').select('*').order('id', { ascending: false }),
+      supabase.from('collection_types').select('*').order('sort_order', { ascending: true }),
+      supabase.from('album_eras').select('*').order('sort_order', { ascending: true }),
+      supabase.from('card_sets').select('*').order('album_id', { ascending: true }).order('sort_order', { ascending: true }),
     ]);
 
-    if (!albumsRes.error) setAlbums(albumsRes.data || []);
-    if (!versionsRes.error) setVersions(versionsRes.data || []);
-    if (!categoriesRes.error) setCategories(categoriesRes.data || []);
-    if (!cardsRes.error) setCards(cardsRes.data || []);
+    if (albumsRes.error) console.error('[loadData] albums:', albumsRes.error);
+    else setAlbums(albumsRes.data || []);
+
+    if (versionsRes.error) console.error('[loadData] album_versions:', versionsRes.error);
+    else setVersions(versionsRes.data || []);
+
+    if (categoriesRes.error) console.error('[loadData] card_categories:', categoriesRes.error);
+    else setCategories(categoriesRes.data || []);
+
+    if (cardsRes.error) console.error('[loadData] cards:', cardsRes.error);
+    else setCards(cardsRes.data || []);
+
+    console.log('[loadData] collection_types result:', collTypesRes.error, collTypesRes.data);
+    if (collTypesRes.error) console.error('[loadData] collection_types error:', collTypesRes.error);
+    else setCollectionTypes(collTypesRes.data || []);
+
+    if (erasRes.error) console.error('[loadData] album_eras:', erasRes.error);
+    else setAlbumEras(erasRes.data || []);
+
+    if (setsRes.error) console.error('[loadData] card_sets:', setsRes.error);
+    else setCardSets(setsRes.data || []);
   }
 
   async function checkSession(showSpinner = true) {
@@ -93,6 +120,9 @@ export default function App() {
         setVersions([]);
         setCategories([]);
         setCards([]);
+        setCollectionTypes([]);
+        setAlbumEras([]);
+        setCardSets([]);
       }
     });
     return () => data.subscription.unsubscribe();
@@ -130,31 +160,37 @@ export default function App() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#7c3aed_0,#4a176d_38%,#2b0a4a_100%)]">
       <header className="sticky top-0 z-10 border-b border-violet-300/20 bg-[#210c36]/80 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center gap-3 justify-between">
-          <div>
-            <h1 className="text-2xl font-black text-white">Army-Collector Admin</h1>
-            <p className="text-sm text-violet-100/80">{sessionEmail}</p>
+        <div className="px-4 py-2 flex items-center gap-3">
+          <div className="shrink-0">
+            <h1 className="text-base font-black text-white leading-tight">Army-Collector Admin</h1>
+            <p className="text-[11px] text-violet-100/70">{sessionEmail}</p>
           </div>
-          <nav className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
-            <TabButton active={tab === 'albums'} onClick={() => setTab('albums')} icon={<Database size={16} />} label="Álbumes" />
-            <TabButton active={tab === 'versions'} onClick={() => setTab('versions')} icon={<Layers3 size={16} />} label="Versiones" />
-            <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={<Tags size={16} />} label="Categorías" />
-            <TabButton active={tab === 'cropper'} onClick={() => setTab('cropper')} icon={<Scissors size={16} />} label="Cropper" />
-            <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')} icon={<Images size={16} />} label="Carga masiva" />
-            <TabButton active={tab === 'cards'} onClick={() => setTab('cards')} icon={<CreditCard size={16} />} label="Cards" />
-            <button onClick={signOut} className="shrink-0 rounded-2xl border border-violet-200/20 bg-white/10 px-4 py-2 text-sm font-bold text-violet-100 flex items-center gap-2 hover:bg-white/15">
-              <LogOut size={16} /> Salir
-            </button>
+          <nav className="flex-1 flex gap-1.5 overflow-x-auto scrollbar-hide min-w-0">
+            <TabButton active={tab === 'collection-types'} onClick={() => setTab('collection-types')} icon={<BookOpen size={14} />} label="Tipos" />
+            <TabButton active={tab === 'album-eras'} onClick={() => setTab('album-eras')} icon={<CalendarDays size={14} />} label="Eras" />
+            <TabButton active={tab === 'albums'} onClick={() => setTab('albums')} icon={<Database size={14} />} label="Álbumes" />
+            <TabButton active={tab === 'versions'} onClick={() => setTab('versions')} icon={<Layers3 size={14} />} label="Versiones" />
+            <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={<Tags size={14} />} label="Categorías" />
+            <TabButton active={tab === 'card-sets'} onClick={() => setTab('card-sets')} icon={<Package size={14} />} label="Card Sets" />
+            <TabButton active={tab === 'cropper'} onClick={() => setTab('cropper')} icon={<Scissors size={14} />} label="Cropper" />
+            <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')} icon={<Images size={14} />} label="Carga masiva" />
+            <TabButton active={tab === 'cards'} onClick={() => setTab('cards')} icon={<CreditCard size={14} />} label="Cards" />
           </nav>
+          <button onClick={signOut} className="shrink-0 rounded-xl border border-violet-200/20 bg-white/10 px-3 py-1.5 text-xs font-bold text-violet-100 flex items-center gap-1.5 hover:bg-white/15">
+            <LogOut size={14} /> Salir
+          </button>
         </div>
       </header>
 
       <section className="w-full p-4 md:p-6">
-        <div className={tab !== 'albums' ? 'hidden' : ''}><AlbumsPanel albums={albums} onChanged={loadData} /></div>
+        <div className={tab !== 'collection-types' ? 'hidden' : ''}><CollectionTypesPanel collectionTypes={collectionTypes} onChanged={loadData} /></div>
+        <div className={tab !== 'album-eras' ? 'hidden' : ''}><AlbumErasPanel collectionTypes={collectionTypes} albumEras={albumEras} onChanged={loadData} /></div>
+        <div className={tab !== 'albums' ? 'hidden' : ''}><AlbumsPanel albums={albums} collectionTypes={collectionTypes} albumEras={albumEras} onChanged={loadData} /></div>
         <div className={tab !== 'versions' ? 'hidden' : ''}><VersionsPanel albums={albums} versions={versions} onChanged={loadData} /></div>
         <div className={tab !== 'categories' ? 'hidden' : ''}><CategoriesPanel categories={categories} onChanged={loadData} /></div>
+        <div className={tab !== 'card-sets' ? 'hidden' : ''}><CardSetsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} onChanged={loadData} /></div>
         <div className={tab !== 'cards' ? 'hidden' : ''}><CardsPanel albums={albums} versions={versions} categories={categories} cards={cards} onChanged={loadData} /></div>
-        <div className={tab !== 'bulk' ? 'hidden' : ''}><BulkCardsPanel albums={albums} versions={versions} categories={categories} importedFiles={importedCropFiles} /></div>
+        <div className={tab !== 'bulk' ? 'hidden' : ''}><BulkCardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} importedFiles={importedCropFiles} /></div>
         <div className={tab !== 'cropper' ? 'hidden' : ''}><CropperPanel onSendToBulk={(files) => { setImportedCropFiles(files); setTab('bulk'); }} /></div>
       </section>
     </main>
@@ -168,7 +204,7 @@ function TabButton({ active, onClick, icon, label }: {
   label: string;
 }) {
   return (
-    <button onClick={onClick} className={`shrink-0 rounded-2xl px-4 py-2 text-sm font-bold flex items-center gap-2 transition ${active ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/20' : 'bg-white/10 border border-violet-200/20 text-violet-100 hover:bg-white/15'}`}>
+    <button onClick={onClick} className={`shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 transition ${active ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/20' : 'bg-white/10 border border-violet-200/20 text-violet-100 hover:bg-white/15'}`}>
       {icon}
       {label}
     </button>

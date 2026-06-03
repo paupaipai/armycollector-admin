@@ -3,21 +3,25 @@ import { ImagePlus, UploadCloud } from 'lucide-react';
 import { STORAGE_BUCKET, supabase, supabaseAdmin } from '../lib/supabase';
 import { BTS_GROUP, BTS_MEMBERS } from '../data/members';
 import { SaveToast } from './SaveToast';
-import type { Album, AlbumVersion, CardCategory, CardInsert, ImportedCropFile } from '../types';
+import type { Album, AlbumVersion, CardCategory, CardInsert, CardSet, ImportedCropFile } from '../types';
+
+const RARITIES = ['Common', 'Rare', 'Ultra Rare', 'Limited'] as const;
 
 type Props = {
   albums: Album[];
   versions: AlbumVersion[];
   categories: CardCategory[];
+  cardSets: CardSet[];
   importedFiles?: ImportedCropFile[];
 };
 
 type FileMap = Record<string, File | undefined>;
 
-export function BulkCardsPanel({ albums, versions, categories, importedFiles = [] }: Props) {
+export function BulkCardsPanel({ albums, versions, categories, cardSets, importedFiles = [] }: Props) {
   const [albumId, setAlbumId] = useState('');
   const [versionId, setVersionId] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [cardSetId, setCardSetId] = useState('');
   const [includeGroup, setIncludeGroup] = useState(true);
   const [basePath, setBasePath] = useState('korean-albums/orul82/album-pcs');
   const [codeBase, setCodeBase] = useState('ORUL82');
@@ -42,6 +46,7 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
   }, [importedFiles]);
 
   const albumVersions = useMemo(() => versions.filter((v) => String(v.album_id) === albumId), [versions, albumId]);
+  const albumCardSets = useMemo(() => cardSets.filter((s) => String(s.album_id) === albumId), [cardSets, albumId]);
   const selectedMembers = includeGroup ? [...BTS_MEMBERS, BTS_GROUP] : [...BTS_MEMBERS];
 
   const generatedRows: CardInsert[] = useMemo(() => {
@@ -65,9 +70,10 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
         release_date: releaseDate || null,
         notes: notes || null,
         is_visible: true,
+        card_set_id: cardSetId ? Number(cardSetId) : null,
       };
     });
-  }, [albumId, versionId, categoryId, basePath, selectedMembers, codeBase, suffix, cardName, groupCardName, rarity, releaseDate, notes]);
+  }, [albumId, versionId, categoryId, cardSetId, basePath, selectedMembers, codeBase, suffix, cardName, groupCardName, rarity, releaseDate, notes]);
 
   function onFiles(e: ChangeEvent<HTMLInputElement>) {
     const incoming = Array.from(e.target.files || []);
@@ -129,7 +135,7 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
       <form onSubmit={submit} className="admin-card p-6 space-y-4">
         <h2 className="text-xl font-black text-white">Carga masiva de photocards</h2>
 
-        <Select label="Álbum" value={albumId} onChange={(v) => { setAlbumId(v); setVersionId(''); }} required>
+        <Select label="Álbum" value={albumId} onChange={(v) => { setAlbumId(v); setVersionId(''); setCardSetId(''); }} required>
           <option value="">Seleccionar</option>
           {albums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </Select>
@@ -137,6 +143,11 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
         <Select label="Versión" value={versionId} onChange={setVersionId}>
           <option value="">Sin versión</option>
           {albumVersions.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.short_name})</option>)}
+        </Select>
+
+        <Select label="Card Set (opcional)" value={cardSetId} onChange={setCardSetId}>
+          <option value="">Sin set</option>
+          {albumCardSets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </Select>
 
         <Select label="Categoría" value={categoryId} onChange={setCategoryId} required>
@@ -154,7 +165,9 @@ export function BulkCardsPanel({ albums, versions, categories, importedFiles = [
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Suffix código" value={suffix} onChange={setSuffix} placeholder="ALBUM-PC" />
-          <Field label="Rareza" value={rarity} onChange={setRarity} />
+          <Select label="Rareza" value={rarity} onChange={setRarity}>
+            {RARITIES.map((r) => <option key={r} value={r}>{r}</option>)}
+          </Select>
         </div>
 
         <Field label="Card name" value={cardName} onChange={setCardName} />

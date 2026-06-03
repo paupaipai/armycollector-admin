@@ -2,10 +2,12 @@ import { FormEvent, useCallback, useMemo, useState } from 'react';
 import { Pencil, Plus, RotateCcw, Save } from 'lucide-react';
 import { supabaseAdmin as supabase } from '../lib/supabase';
 import { SaveToast } from './SaveToast';
-import type { Album } from '../types';
+import type { Album, AlbumEra, CollectionType } from '../types';
 
 type Props = {
   albums: Album[];
+  collectionTypes: CollectionType[];
+  albumEras: AlbumEra[];
   onChanged: () => Promise<void>;
 };
 
@@ -20,6 +22,8 @@ const emptyForm = {
   cover_image_url: '',
   sort_order: '',
   is_active: true,
+  collection_type_id: '',
+  era_id: '',
 };
 
 function buildCoverPath(category: string, shortName: string) {
@@ -29,7 +33,7 @@ function buildCoverPath(category: string, shortName: string) {
   return `${cat}/${slug}/cover.png`;
 }
 
-export function AlbumsPanel({ albums, onChanged }: Props) {
+export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyForm);
@@ -43,12 +47,18 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
     return albums.filter((a) => [a.name, a.short_name, a.artist, String(a.release_year ?? '')].some((v) => (v || '').toLowerCase().includes(q)));
   }, [albums, search]);
 
+  const filteredEras = useMemo(
+    () => albumEras.filter((e) => String(e.collection_type_id) === form.collection_type_id),
+    [albumEras, form.collection_type_id]
+  );
+
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
       if (key === 'cover_category' || key === 'short_name') {
         next.cover_image_url = buildCoverPath(next.cover_category, next.short_name);
       }
+      if (key === 'collection_type_id') next.era_id = '';
       return next;
     });
   }
@@ -75,6 +85,8 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
       cover_image_url: existingPath,
       sort_order: album.sort_order ? String(album.sort_order) : '',
       is_active: Boolean(album.is_active),
+      collection_type_id: album.collection_type_id ? String(album.collection_type_id) : '',
+      era_id: album.era_id ? String(album.era_id) : '',
     });
     setMessage(null);
   }
@@ -93,6 +105,8 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
       cover_image_url: form.cover_image_url.trim() || null,
       sort_order: form.sort_order ? Number(form.sort_order) : null,
       is_active: form.is_active,
+      collection_type_id: form.collection_type_id ? Number(form.collection_type_id) : null,
+      era_id: form.era_id ? Number(form.era_id) : null,
     };
 
     const query = editingId
@@ -145,6 +159,25 @@ export function AlbumsPanel({ albums, onChanged }: Props) {
             {form.cover_image_url || <span className="text-violet-200/30">se genera automáticamente</span>}
           </div>
         </label>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="label">Tipo de colección</span>
+            <select className="input" value={form.collection_type_id}
+              onChange={(e) => set('collection_type_id', e.target.value)}>
+              <option value="">Sin tipo</option>
+              {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.icon} {t.name}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Era</span>
+            <select className="input" value={form.era_id}
+              onChange={(e) => set('era_id', e.target.value)}>
+              <option value="">Sin era</option>
+              {filteredEras.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </label>
+        </div>
 
         <label className="flex items-center gap-2 text-sm font-bold text-violet-50">
           <input type="checkbox" checked={form.is_active} onChange={(e) => set('is_active', e.target.checked)} />
