@@ -19,7 +19,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [tab, setTab] = useState<Tab>('albums');
+  const [tab, setTab] = useState<Tab>('collection-types');
   const [importedCropFiles, setImportedCropFiles] = useState<ImportedCropFile[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
   const [versions, setVersions] = useState<AlbumVersion[]>([]);
@@ -33,13 +33,13 @@ export default function App() {
   async function loadData() {
     console.log('[loadData] iniciando...');
     const [albumsRes, versionsRes, categoriesRes, cardsRes, collTypesRes, erasRes, setsRes] = await Promise.all([
-      supabase.from('albums').select('*').order('sort_order', { ascending: true }).order('name'),
-      supabase.from('album_versions').select('*').order('album_id', { ascending: true }).order('sort_order', { ascending: true }),
-      supabase.from('card_categories').select('*').order('sort_order', { ascending: true }),
-      supabase.from('cards').select('*').order('id', { ascending: false }),
-      supabase.from('collection_types').select('*').order('sort_order', { ascending: true }),
-      supabase.from('album_eras').select('*').order('sort_order', { ascending: true }),
-      supabase.from('card_sets').select('*').order('album_id', { ascending: true }).order('sort_order', { ascending: true }),
+      supabase.from('albums').select('*').order('id', { ascending: true }),
+      supabase.from('album_versions').select('*').order('id', { ascending: true }),
+      supabase.from('card_categories').select('*').order('id', { ascending: true }),
+      supabase.from('cards').select('*').order('id', { ascending: true }),
+      supabase.from('collection_types').select('*').order('id', { ascending: true }),
+      supabase.from('album_eras').select('*').order('id', { ascending: true }).order('sort_order', { ascending: true }),
+      supabase.from('card_sets').select('*').order('id', { ascending: true }),
     ]);
 
     if (albumsRes.error) console.error('[loadData] albums:', albumsRes.error);

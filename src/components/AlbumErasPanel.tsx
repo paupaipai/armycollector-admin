@@ -15,6 +15,7 @@ const emptyForm = {
   name: '',
   short_name: '',
   description: '',
+  icon_name: '',
   color: '#A855F7',
   sort_order: '0',
   is_active: true,
@@ -53,6 +54,7 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
       name: era.name,
       short_name: era.short_name,
       description: era.description || '',
+      icon_name: era.icon_name || '',
       color: era.color || '#A855F7',
       sort_order: String(era.sort_order ?? 0),
       is_active: era.is_active,
@@ -68,15 +70,17 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
       name: form.name.trim(),
       short_name: form.short_name.trim(),
       description: form.description.trim() || null,
+      icon_name: form.icon_name.trim() || null,
       color: form.color || null,
       sort_order: Number(form.sort_order) || 0,
       is_active: form.is_active,
     };
-    const query = editingId
-      ? supabase.from('album_eras').update(payload).eq('id', editingId)
-      : supabase.from('album_eras').insert(payload);
+    console.log('[submit] editingId:', editingId, 'payload:', payload);
     setToastStatus('saving');
-    const { error } = await query;
+    const { data, error } = editingId
+      ? await supabase.from('album_eras').update(payload).eq('id', editingId).select()
+      : await supabase.from('album_eras').insert(payload).select();
+    console.log('[submit] result:', { data, error });
     if (error) { setToastStatus(null); setMessage(error.message); return; }
     await onChanged();
     setToastStatus('success');
@@ -104,12 +108,15 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
             <select className="input" value={form.collection_type_id}
               onChange={(e) => set('collection_type_id', e.target.value)} required>
               <option value="">Seleccionar</option>
-              {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.icon} {t.name}</option>)}
+              {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </label>
 
           <Field label="Nombre" value={form.name} onChange={(v) => set('name', v)} placeholder="Love Yourself Era" required />
-          <Field label="Short name" value={form.short_name} onChange={(v) => set('short_name', v)} placeholder="ly-era" required />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Short name" value={form.short_name} onChange={(v) => set('short_name', v)} placeholder="ly-era" required />
+            <Field label="Nombre del ícono" value={form.icon_name} onChange={(v) => set('icon_name', v)} placeholder="heart" />
+          </div>
           <Field label="Descripción" value={form.description} onChange={(v) => set('description', v)} />
           <div className="grid grid-cols-2 gap-3">
             <ColorField label="Color" value={form.color} onChange={(v) => set('color', v)} />
@@ -132,7 +139,7 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
           <div className="rounded-3xl border border-violet-200/10">
             <table className="admin-table">
               <thead>
-                <tr><th>ID</th><th>Tipo</th><th>Nombre</th><th>Short</th><th>Orden</th><th>Activa</th><th></th></tr>
+                <tr><th>ID</th><th>Tipo</th><th>Nombre</th><th>Short</th><th>Ícono</th><th>Orden</th><th>Activa</th><th></th></tr>
               </thead>
               <tbody>
                 {filtered.map((era) => (
@@ -141,6 +148,7 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
                     <td>{collectionTypeName(era.collection_type_id)}</td>
                     <td className="font-bold">{era.name}</td>
                     <td>{era.short_name}</td>
+                    <td>{era.icon_name}</td>
                     <td>{era.sort_order}</td>
                     <td>{era.is_active ? 'Sí' : 'No'}</td>
                     <td><button className="icon-btn" onClick={() => edit(era)}><Pencil size={15} /> Editar</button></td>

@@ -96,6 +96,7 @@ export type AlbumEra = {
   name: string;
   short_name: string;
   description: string | null;
+  icon_name: string | null;
   color: string | null;
   sort_order: number;
   is_active: boolean;
