@@ -22,6 +22,7 @@ const emptyForm = {
 export function CollectionTypesPanel({ collectionTypes, onChanged }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [activeFilter, setActiveFilter] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
   const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
@@ -29,11 +30,13 @@ export function CollectionTypesPanel({ collectionTypes, onChanged }: Props) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return collectionTypes;
-    return collectionTypes.filter((t) =>
-      [t.name, t.short_name, t.description].some((v) => (v || '').toLowerCase().includes(q))
-    );
-  }, [collectionTypes, search]);
+    return collectionTypes.filter((t) => {
+      if (activeFilter === 'active' && !t.is_active) return false;
+      if (activeFilter === 'inactive' && t.is_active) return false;
+      if (!q) return true;
+      return [t.name, t.short_name, t.description].some((v) => (v || '').toLowerCase().includes(q));
+    });
+  }, [collectionTypes, search, activeFilter]);
 
   function set<K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -70,12 +73,23 @@ export function CollectionTypesPanel({ collectionTypes, onChanged }: Props) {
       sort_order: Number(form.sort_order) || 0,
       is_active: form.is_active,
     };
-    const query = editingId
-      ? supabase.from('collection_types').update(payload).eq('id', editingId)
-      : supabase.from('collection_types').insert(payload);
     setToastStatus('saving');
-    const { error } = await query;
-    if (error) { setToastStatus(null); setMessage(error.message); return; }
+    if (editingId) {
+      const { data, error } = await supabase
+        .from('collection_types')
+        .update(payload)
+        .eq('id', editingId)
+        .select();
+      if (error) { setToastStatus(null); setMessage(error.message); return; }
+      if (!data || data.length === 0) {
+        setToastStatus(null);
+        setMessage('No se pudo actualizar el registro. Verifica los permisos en Supabase (RLS).');
+        return;
+      }
+    } else {
+      const { error } = await supabase.from('collection_types').insert(payload);
+      if (error) { setToastStatus(null); setMessage(error.message); return; }
+    }
     await onChanged();
     setToastStatus('success');
     reset();
@@ -114,9 +128,17 @@ export function CollectionTypesPanel({ collectionTypes, onChanged }: Props) {
         </form>
 
         <div className="admin-card p-6 min-w-0">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+          <div className="flex flex-col gap-3 mb-4">
             <h2 className="text-xl font-black text-white">Tipos de colección</h2>
-            <input className="input max-w-sm" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar..." />
+            <div className="grid md:grid-cols-2 gap-3">
+              <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar tipo..." />
+              <select className="input" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}>
+                <option value="">Activo / Inactivo</option>
+                <option value="active">Solo activos</option>
+                <option value="inactive">Solo inactivos</option>
+              </select>
+            </div>
+            <p className="text-xs text-violet-100/65">Mostrando {filtered.length} de {collectionTypes.length} tipos.</p>
           </div>
           <div className="rounded-3xl border border-violet-200/10">
             <table className="admin-table">

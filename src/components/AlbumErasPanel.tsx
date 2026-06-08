@@ -24,6 +24,8 @@ const emptyForm = {
 export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [collectionTypeFilter, setCollectionTypeFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
   const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
@@ -31,11 +33,14 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return albumEras;
-    return albumEras.filter((e) =>
-      [e.name, e.short_name, e.description].some((v) => (v || '').toLowerCase().includes(q))
-    );
-  }, [albumEras, search]);
+    return albumEras.filter((e) => {
+      if (collectionTypeFilter && String(e.collection_type_id) !== collectionTypeFilter) return false;
+      if (activeFilter === 'active' && !e.is_active) return false;
+      if (activeFilter === 'inactive' && e.is_active) return false;
+      if (!q) return true;
+      return [e.name, e.short_name, e.description].some((v) => (v || '').toLowerCase().includes(q));
+    });
+  }, [albumEras, search, collectionTypeFilter, activeFilter]);
 
   function set<K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -82,6 +87,11 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
       : await supabase.from('album_eras').insert(payload).select();
     console.log('[submit] result:', { data, error });
     if (error) { setToastStatus(null); setMessage(error.message); return; }
+    if (editingId && (!data || data.length === 0)) {
+      setToastStatus(null);
+      setMessage('No se pudo actualizar. Verifica los permisos en Supabase (RLS).');
+      return;
+    }
     await onChanged();
     setToastStatus('success');
     reset();
@@ -132,9 +142,21 @@ export function AlbumErasPanel({ collectionTypes, albumEras, onChanged }: Props)
         </form>
 
         <div className="admin-card p-6 min-w-0">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+          <div className="flex flex-col gap-3 mb-4">
             <h2 className="text-xl font-black text-white">Eras existentes</h2>
-            <input className="input max-w-sm" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar..." />
+            <div className="grid md:grid-cols-3 gap-3">
+              <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar era..." />
+              <select className="input" value={collectionTypeFilter} onChange={(e) => setCollectionTypeFilter(e.target.value)}>
+                <option value="">Todos los tipos</option>
+                {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <select className="input" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}>
+                <option value="">Activa / Inactiva</option>
+                <option value="active">Solo activas</option>
+                <option value="inactive">Solo inactivas</option>
+              </select>
+            </div>
+            <p className="text-xs text-violet-100/65">Mostrando {filtered.length} de {albumEras.length} eras.</p>
           </div>
           <div className="rounded-3xl border border-violet-200/10">
             <table className="admin-table">

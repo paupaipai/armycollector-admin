@@ -28,6 +28,8 @@ const emptyForm = {
 export function CardSetsPanel({ albums, versions, categories, cardSets, onChanged }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [albumFilter, setAlbumFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
   const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
@@ -40,11 +42,14 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return cardSets;
-    return cardSets.filter((s) =>
-      [s.name, s.short_name, s.description, s.retailer, s.round].some((v) => (v || '').toLowerCase().includes(q))
-    );
-  }, [cardSets, search]);
+    return cardSets.filter((s) => {
+      if (albumFilter && String(s.album_id) !== albumFilter) return false;
+      if (activeFilter === 'active' && !s.is_active) return false;
+      if (activeFilter === 'inactive' && s.is_active) return false;
+      if (!q) return true;
+      return [s.name, s.short_name, s.description, s.retailer, s.round].some((v) => (v || '').toLowerCase().includes(q));
+    });
+  }, [cardSets, search, albumFilter, activeFilter]);
 
   function set<K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) {
     setForm((prev) => {
@@ -92,12 +97,19 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
       sort_order: Number(form.sort_order) || 0,
       is_active: form.is_active,
     };
-    const query = editingId
-      ? supabase.from('card_sets').update(payload).eq('id', editingId)
-      : supabase.from('card_sets').insert(payload);
     setToastStatus('saving');
-    const { error } = await query;
-    if (error) { setToastStatus(null); setMessage(error.message); return; }
+    if (editingId) {
+      const { data, error } = await supabase.from('card_sets').update(payload).eq('id', editingId).select();
+      if (error) { setToastStatus(null); setMessage(error.message); return; }
+      if (!data || data.length === 0) {
+        setToastStatus(null);
+        setMessage('No se pudo actualizar. Verifica los permisos en Supabase (RLS).');
+        return;
+      }
+    } else {
+      const { error } = await supabase.from('card_sets').insert(payload);
+      if (error) { setToastStatus(null); setMessage(error.message); return; }
+    }
     await onChanged();
     setToastStatus('success');
     reset();
@@ -166,9 +178,21 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
         </form>
 
         <div className="admin-card p-6 min-w-0">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+          <div className="flex flex-col gap-3 mb-4">
             <h2 className="text-xl font-black text-white">Card Sets existentes</h2>
-            <input className="input max-w-sm" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar..." />
+            <div className="grid md:grid-cols-3 gap-3">
+              <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar nombre, retailer..." />
+              <select className="input" value={albumFilter} onChange={(e) => setAlbumFilter(e.target.value)}>
+                <option value="">Todos los álbumes</option>
+                {albums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <select className="input" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}>
+                <option value="">Activo / Inactivo</option>
+                <option value="active">Solo activos</option>
+                <option value="inactive">Solo inactivos</option>
+              </select>
+            </div>
+            <p className="text-xs text-violet-100/65">Mostrando {filtered.length} de {cardSets.length} sets.</p>
           </div>
           <div className="rounded-3xl border border-violet-200/10">
             <table className="admin-table">

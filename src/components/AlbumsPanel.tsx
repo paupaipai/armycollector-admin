@@ -36,6 +36,8 @@ function buildCoverPath(category: string, shortName: string) {
 export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [collectionTypeFilter, setCollectionTypeFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
   const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
@@ -43,9 +45,14 @@ export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: P
 
   const filteredAlbums = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return albums;
-    return albums.filter((a) => [a.name, a.short_name, a.artist, String(a.release_year ?? '')].some((v) => (v || '').toLowerCase().includes(q)));
-  }, [albums, search]);
+    return albums.filter((a) => {
+      if (collectionTypeFilter && String(a.collection_type_id) !== collectionTypeFilter) return false;
+      if (activeFilter === 'active' && !a.is_active) return false;
+      if (activeFilter === 'inactive' && a.is_active) return false;
+      if (!q) return true;
+      return [a.name, a.short_name, a.artist, String(a.release_year ?? '')].some((v) => (v || '').toLowerCase().includes(q));
+    });
+  }, [albums, search, collectionTypeFilter, activeFilter]);
 
   const filteredEras = useMemo(
     () => albumEras.filter((e) => String(e.collection_type_id) === form.collection_type_id),
@@ -109,16 +116,18 @@ export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: P
       era_id: form.era_id ? Number(form.era_id) : null,
     };
 
-    const query = editingId
-      ? supabase.from('albums').update(payload).eq('id', editingId)
-      : supabase.from('albums').insert(payload);
-
     setToastStatus('saving');
-    const { error } = await query;
-    if (error) {
-      setToastStatus(null);
-      setMessage(error.message);
-      return;
+    if (editingId) {
+      const { data, error } = await supabase.from('albums').update(payload).eq('id', editingId).select();
+      if (error) { setToastStatus(null); setMessage(error.message); return; }
+      if (!data || data.length === 0) {
+        setToastStatus(null);
+        setMessage('No se pudo actualizar. Verifica los permisos en Supabase (RLS).');
+        return;
+      }
+    } else {
+      const { error } = await supabase.from('albums').insert(payload);
+      if (error) { setToastStatus(null); setMessage(error.message); return; }
     }
 
     await onChanged();
@@ -189,9 +198,21 @@ export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: P
       </form>
 
       <div className="admin-card p-6 min-w-0">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+        <div className="flex flex-col gap-3 mb-4">
           <h2 className="text-xl font-black text-white">Álbumes existentes</h2>
-          <input className="input max-w-sm" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar álbum..." />
+          <div className="grid md:grid-cols-3 gap-3">
+            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar álbum..." />
+            <select className="input" value={collectionTypeFilter} onChange={(e) => setCollectionTypeFilter(e.target.value)}>
+              <option value="">Todos los tipos</option>
+              {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.icon} {t.name}</option>)}
+            </select>
+            <select className="input" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}>
+              <option value="">Activo / Inactivo</option>
+              <option value="active">Solo activos</option>
+              <option value="inactive">Solo inactivos</option>
+            </select>
+          </div>
+          <p className="text-xs text-violet-100/65">Mostrando {filteredAlbums.length} de {albums.length} álbumes.</p>
         </div>
         <div className="rounded-3xl border border-violet-200/10">
           <table className="admin-table">

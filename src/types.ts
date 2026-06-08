@@ -29,6 +29,7 @@ export type CardCategory = {
   description: string | null;
   color: string | null;
   sort_order: number | null;
+  is_active: boolean | null;
 };
 
 export type Card = {

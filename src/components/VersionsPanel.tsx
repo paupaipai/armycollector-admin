@@ -12,6 +12,7 @@ type Props = {
 
 export function VersionsPanel({ albums, versions, onChanged }: Props) {
   const [albumId, setAlbumId] = useState<string>('');
+  const [search, setSearch] = useState('');
   const [bulk, setBulk] = useState('');
   const [loadedVersionIds, setLoadedVersionIds] = useState<number[]>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -22,10 +23,14 @@ export function VersionsPanel({ albums, versions, onChanged }: Props) {
   const versionsRef = useRef(versions);
   versionsRef.current = versions;
 
-  const selectedVersions = useMemo(
-    () => versions.filter((v) => !albumId || String(v.album_id) === albumId),
-    [versions, albumId],
-  );
+  const selectedVersions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return versions.filter((v) => {
+      if (albumId && String(v.album_id) !== albumId) return false;
+      if (!q) return true;
+      return [v.name, v.short_name].some((s) => (s || '').toLowerCase().includes(q));
+    });
+  }, [versions, albumId, search]);
 
   function loadVersionsForAlbum(id: string) {
     if (!id) { setBulk(''); setLoadedVersionIds([]); return; }
@@ -142,7 +147,11 @@ export function VersionsPanel({ albums, versions, onChanged }: Props) {
         </form>
 
         <div className="admin-card p-6 min-w-0">
-          <h2 className="text-xl font-black text-white mb-4">Versiones guardadas</h2>
+          <div className="flex flex-col gap-3 mb-4">
+            <h2 className="text-xl font-black text-white">Versiones guardadas</h2>
+            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar versión..." />
+            <p className="text-xs text-violet-100/65">Mostrando {selectedVersions.length} de {versions.length} versiones.</p>
+          </div>
           <div className="rounded-3xl border border-violet-200/10">
             <table className="admin-table">
               <thead>
