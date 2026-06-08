@@ -190,7 +190,7 @@ export default function App() {
         <div className={tab !== 'categories' ? 'hidden' : ''}><CategoriesPanel categories={categories} onChanged={loadData} /></div>
         <div className={tab !== 'card-sets' ? 'hidden' : ''}><CardSetsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} onChanged={loadData} /></div>
         <div className={tab !== 'cards' ? 'hidden' : ''}><CardsPanel albums={albums} versions={versions} categories={categories} cards={cards} onChanged={loadData} /></div>
-        <div className={tab !== 'bulk' ? 'hidden' : ''}><BulkCardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} importedFiles={importedCropFiles} /></div>
+        <div className={tab !== 'bulk' ? 'hidden' : ''}><BulkCardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} collectionTypes={collectionTypes} importedFiles={importedCropFiles} /></div>
         <div className={tab !== 'cropper' ? 'hidden' : ''}><CropperPanel onSendToBulk={(files) => { setImportedCropFiles(files); setTab('bulk'); }} /></div>
       </section>
     </main>

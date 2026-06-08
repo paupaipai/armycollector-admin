@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Album, AlbumVersion, Card, CardCategory } from '../types';
+import { STORAGE_BUCKET, supabase } from '../lib/supabase';
+
+function getImageUrl(imagePath: string): string {
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(imagePath);
+  return data.publicUrl;
+}
 
 type Props = {
   albums: Album[];
@@ -13,6 +20,7 @@ export function CardsPanel({ albums, versions, categories, cards }: Props) {
   const [search, setSearch] = useState('');
   const [albumFilter, setAlbumFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -46,6 +54,7 @@ export function CardsPanel({ albums, versions, categories, cards }: Props) {
           <thead>
             <tr>
               <th>ID</th>
+              <th>Img</th>
               <th>Álbum</th>
               <th>Versión</th>
               <th>Categoría</th>
@@ -60,9 +69,31 @@ export function CardsPanel({ albums, versions, categories, cards }: Props) {
               const album = albums.find((a) => a.id === c.album_id);
               const version = versions.find((v) => v.id === c.version_id);
               const category = categories.find((cat) => cat.id === c.category_id);
+              const imgUrl = c.image_path ? getImageUrl(c.image_path) : null;
               return (
                 <tr key={c.id}>
                   <td>{c.id}</td>
+                  <td>
+                    {imgUrl ? (
+                      <img
+                        src={imgUrl}
+                        alt={c.card_name}
+                        className="w-8 h-10 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => setPreviewUrl(imgUrl)}
+                        loading="lazy"
+                        onError={(e) => {
+                          const el = e.currentTarget;
+                          el.style.display = 'none';
+                          const span = document.createElement('span');
+                          span.className = 'text-violet-100/40 text-xs';
+                          span.textContent = 'No image';
+                          el.parentElement?.appendChild(span);
+                        }}
+                      />
+                    ) : (
+                      <span className="text-violet-100/40 text-xs">No image</span>
+                    )}
+                  </td>
                   <td>{album?.short_name || album?.name || c.album_id}</td>
                   <td>{version?.short_name || '-'}</td>
                   <td>{category?.short_name || category?.name || c.category_id}</td>
@@ -76,6 +107,28 @@ export function CardsPanel({ albums, versions, categories, cards }: Props) {
           </tbody>
         </table>
       </div>
+
+      {previewUrl && createPortal(
+        <div
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.75)' }}
+          onClick={() => setPreviewUrl(null)}
+        >
+          <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+            <button
+              style={{ position: 'absolute', top: -12, right: -12, width: 32, height: 32, borderRadius: '50%', background: '#7c3aed', color: 'white', fontWeight: 'bold', fontSize: 14, border: 'none', cursor: 'pointer', zIndex: 1 }}
+              onClick={() => setPreviewUrl(null)}
+            >
+              ✕
+            </button>
+            <img
+              src={previewUrl}
+              alt="Vista previa"
+              style={{ maxHeight: '80vh', maxWidth: '90vw', width: 'auto', borderRadius: 16, boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { ImagePlus, UploadCloud } from 'lucide-react';
 import { STORAGE_BUCKET, supabase, supabaseAdmin } from '../lib/supabase';
 import { BTS_GROUP, BTS_MEMBERS } from '../data/members';
 import { SaveToast } from './SaveToast';
-import type { Album, AlbumVersion, CardCategory, CardInsert, CardSet, ImportedCropFile } from '../types';
+import type { Album, AlbumVersion, CardCategory, CardInsert, CardSet, CollectionType, ImportedCropFile } from '../types';
 
 const RARITIES = ['Common', 'Rare', 'Ultra Rare', 'Limited'] as const;
 
@@ -12,12 +12,17 @@ type Props = {
   versions: AlbumVersion[];
   categories: CardCategory[];
   cardSets: CardSet[];
+  collectionTypes: CollectionType[];
   importedFiles?: ImportedCropFile[];
 };
 
 type FileMap = Record<string, File | undefined>;
 
-export function BulkCardsPanel({ albums, versions, categories, cardSets, importedFiles = [] }: Props) {
+function toSlug(s: string) {
+  return s.trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+export function BulkCardsPanel({ albums, versions, categories, cardSets, collectionTypes, importedFiles = [] }: Props) {
   const [albumId, setAlbumId] = useState('');
   const [versionId, setVersionId] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -47,6 +52,23 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, importe
 
   const albumVersions = useMemo(() => versions.filter((v) => String(v.album_id) === albumId), [versions, albumId]);
   const albumCardSets = useMemo(() => cardSets.filter((s) => String(s.album_id) === albumId), [cardSets, albumId]);
+
+  useEffect(() => {
+    if (!albumId || !categoryId) return;
+    const album = albums.find((a) => String(a.id) === albumId);
+    const category = categories.find((c) => String(c.id) === categoryId);
+    const collectionType = album?.collection_type_id
+      ? collectionTypes.find((t) => t.id === album.collection_type_id)
+      : null;
+
+    const typePart = collectionType ? toSlug(collectionType.short_name) : 'unknown';
+    const albumPart = album ? toSlug(album.short_name || album.name) : 'unknown';
+    const catPart = category ? toSlug(category.short_name || category.name) : 'unknown';
+
+    setBasePath(`${typePart}/${albumPart}/${catPart}`);
+    if (album?.short_name) setCodeBase(album.short_name.toUpperCase().replace(/_/g, '-'));
+    if (album?.release_date) setReleaseDate(album.release_date.slice(0, 10));
+  }, [albumId, categoryId, albums, categories, collectionTypes]);
   const selectedMembers = includeGroup ? [...BTS_MEMBERS, BTS_GROUP] : [...BTS_MEMBERS];
 
   const generatedRows: CardInsert[] = useMemo(() => {
@@ -61,7 +83,7 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, importe
         member_full_name: m.fullName,
         member_emoji: m.emoji,
         retailer: null,
-        card_name: isGroup ? groupCardName : cardName,
+        card_name: isGroup ? groupCardName : `${m.member} ${cardName}`,
         code: [codeBase, m.codePart, suffix].filter(Boolean).join('-').toUpperCase(),
         image_path: `${normalizedBasePath}/${m.fileName}`,
         rarity,
