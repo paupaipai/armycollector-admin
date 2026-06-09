@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Album, AlbumVersion, Card, CardCategory } from '../types';
+import type { Album, AlbumVersion, Card, CardCategory, CardSet } from '../types';
 import { STORAGE_BUCKET, supabase } from '../lib/supabase';
 
 function getImageUrl(imagePath: string): string {
@@ -12,11 +12,12 @@ type Props = {
   albums: Album[];
   versions: AlbumVersion[];
   categories: CardCategory[];
+  cardSets: CardSet[];
   cards: Card[];
   onChanged: () => Promise<void>;
 };
 
-export function CardsPanel({ albums, versions, categories, cards }: Props) {
+export function CardsPanel({ albums, versions, categories, cardSets, cards }: Props) {
   const [search, setSearch] = useState('');
   const [albumFilter, setAlbumFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -58,6 +59,7 @@ export function CardsPanel({ albums, versions, categories, cards }: Props) {
               <th>Álbum</th>
               <th>Versión</th>
               <th>Categoría</th>
+              <th>Set</th>
               <th>Miembro</th>
               <th>Card</th>
               <th>Code</th>
@@ -69,6 +71,7 @@ export function CardsPanel({ albums, versions, categories, cards }: Props) {
               const album = albums.find((a) => a.id === c.album_id);
               const version = versions.find((v) => v.id === c.version_id);
               const category = categories.find((cat) => cat.id === c.category_id);
+              const cardSet = cardSets.find((s) => s.id === c.card_set_id);
               const imgUrl = c.image_path ? getImageUrl(c.image_path) : null;
               return (
                 <tr key={c.id}>
@@ -97,6 +100,7 @@ export function CardsPanel({ albums, versions, categories, cards }: Props) {
                   <td>{album?.short_name || album?.name || c.album_id}</td>
                   <td>{version?.short_name || '-'}</td>
                   <td>{category?.short_name || category?.name || c.category_id}</td>
+                  <td>{cardSet?.short_name || cardSet?.name || '-'}</td>
                   <td className="font-bold">{c.member}</td>
                   <td>{c.card_name}</td>
                   <td className="font-mono text-xs">{c.code}</td>
