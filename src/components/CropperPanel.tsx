@@ -1,5 +1,5 @@
 import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Eraser, ImagePlus, PenLine, ScanSearch, Send, X } from 'lucide-react';
+import { Download, Eraser, ImagePlus, PenLine, ScanSearch, Send, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ImportedCropFile } from '../types';
 
 const MEMBERS = ['rm', 'jin', 'suga', 'jhope', 'jimin', 'v', 'jungkook', 'group'] as const;
@@ -36,6 +36,8 @@ export function CropperPanel({ onSendToBulk }: Props) {
   const [minArea, setMinArea] = useState(20000);
   const [whiteThreshold, setWhiteThreshold] = useState(245);
   const [status, setStatus] = useState('Esperando imagen.');
+  const [zoom, setZoom] = useState(1);
+  const [renderedSize, setRenderedSize] = useState<{ w: number; h: number } | null>(null);
 
   const canDetect = mode === 'auto' && imageReady && selection && selection.w > 10 && selection.h > 10;
   const canSend = crops.length > 0;
@@ -52,7 +54,7 @@ export function CropperPanel({ onSendToBulk }: Props) {
     const onResize = () => syncOverlaySize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [imageReady, selection, detectedBoxes]);
+  }, [imageReady, selection, detectedBoxes, zoom]);
 
   const cropFiles = useMemo(() => crops.map((crop) => dataUrlToFile(crop.url, crop.filename)), [crops]);
 
@@ -69,12 +71,16 @@ export function CropperPanel({ onSendToBulk }: Props) {
     setManualDraft(null);
     setDetectedBoxes([]);
     setCrops([]);
+    setZoom(1);
+    setRenderedSize(null);
     setStatus('Cargando imagen...');
   }
 
   function onImageLoad() {
     setImageReady(true);
     requestAnimationFrame(() => {
+      const img = imageRef.current;
+      if (img) setRenderedSize({ w: img.offsetWidth, h: img.offsetHeight });
       syncOverlaySize();
       setStatus(
         mode === 'manual'
@@ -87,17 +93,12 @@ export function CropperPanel({ onSendToBulk }: Props) {
   function syncOverlaySize() {
     const image = imageRef.current;
     const canvas = canvasRef.current;
-    const stage = stageRef.current;
-    if (!image || !canvas || !stage) return;
+    if (!image || !canvas) return;
 
-    const imageRect = image.getBoundingClientRect();
-    const stageRect = stage.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.round(imageRect.width));
-    canvas.height = Math.max(1, Math.round(imageRect.height));
-    canvas.style.width = `${imageRect.width}px`;
-    canvas.style.height = `${imageRect.height}px`;
-    canvas.style.left = `${imageRect.left - stageRect.left}px`;
-    canvas.style.top = `${imageRect.top - stageRect.top}px`;
+    canvas.width = Math.max(1, Math.round(image.offsetWidth));
+    canvas.height = Math.max(1, Math.round(image.offsetHeight));
+    canvas.style.width = `${image.offsetWidth}px`;
+    canvas.style.height = `${image.offsetHeight}px`;
     redraw();
   }
 
@@ -410,6 +411,20 @@ export function CropperPanel({ onSendToBulk }: Props) {
     onSendToBulk(cropFiles);
   }
 
+  function zoomIn() { setZoom((z) => Math.min(4, parseFloat((z + 0.25).toFixed(2)))); }
+  function zoomOut() { setZoom((z) => Math.max(0.5, parseFloat((z - 0.25).toFixed(2)))); }
+  function resetZoom() { setZoom(1); }
+
+  // Tamaño físico del wrapper de imagen: base × zoom (genera scroll real en el contenedor)
+  const wrapperStyle = renderedSize && zoom !== 1
+    ? { width: renderedSize.w * zoom, height: renderedSize.h * zoom, flexShrink: 0 as const }
+    : { display: 'inline-block' as const };
+
+  // La imagen llena el wrapper cuando tiene dimensiones explícitas
+  const imageExplicit = renderedSize && zoom !== 1
+    ? { width: '100%', height: '100%', maxHeight: 'none' as const, maxWidth: 'none' as const }
+    : undefined;
+
   const instructionText = mode === 'manual'
     ? 'Modo manual: arrastra sobre cada photocard individualmente para marcarla.'
     : 'Flujo: subir imagen → arrastrar selección sobre las PCs → detectar → revisar nombres → enviar a carga masiva.';
@@ -460,20 +475,57 @@ export function CropperPanel({ onSendToBulk }: Props) {
           <button type="button" disabled={!canSend} onClick={sendToBulk} className="inline-flex items-center gap-2 rounded-2xl border border-pink-200/30 bg-pink-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-45">
             <Send size={18} /> Enviar a carga masiva
           </button>
+          {imageReady && (
+            <div className="flex items-center overflow-hidden rounded-2xl border border-violet-200/20 bg-violet-950/70">
+              <button type="button" onClick={zoomOut} disabled={zoom <= 0.5} title="Alejar" className="px-3 py-2.5 text-violet-300 transition hover:bg-violet-900/50 disabled:opacity-40">
+                <ZoomOut size={16} />
+              </button>
+              <button type="button" onClick={resetZoom} title="Restablecer zoom" className="min-w-[3.5rem] text-center text-xs font-bold text-violet-200 hover:text-white transition">
+                {Math.round(zoom * 100)}%
+              </button>
+              <button type="button" onClick={zoomIn} disabled={zoom >= 4} title="Acercar" className="px-3 py-2.5 text-violet-300 transition hover:bg-violet-900/50 disabled:opacity-40">
+                <ZoomIn size={16} />
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="mt-5 rounded-3xl border border-violet-200/15 bg-black/35 p-4">
-          <div ref={stageRef} className="relative flex min-h-[430px] items-center justify-center overflow-hidden rounded-2xl bg-black/75">
-            {!imageSrc && <div className="px-6 text-center text-sm text-violet-100/75">Sube una imagen para empezar.</div>}
-            {imageSrc && <img ref={imageRef} src={imageSrc} onLoad={onImageLoad} alt="Template para recortar" className="block max-h-[72vh] max-w-full select-none" draggable={false} />}
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 cursor-crosshair"
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={finishSelection}
-              onPointerLeave={finishSelection}
-            />
+          {/* Stage: tamaño fijo capturado al cargar (zoom=1). NUNCA crece. */}
+          <div
+            ref={stageRef}
+            className="relative rounded-2xl bg-black/75"
+            style={{ minHeight: 430, height: renderedSize?.h, maxHeight: '72vh' }}
+          >
+            {/* Viewport de scroll: absolutamente posicionado → mismo tamaño que stage siempre,
+                el scrollbar no afecta el tamaño del stage padre */}
+            <div className="absolute inset-0 overflow-auto">
+              {/* Capa de centrado: min-h/w 100% para centrar cuando la imagen es pequeña */}
+              <div className="flex min-h-full min-w-full items-center justify-center">
+                {!imageSrc && <div className="px-6 text-center text-sm text-violet-100/75">Sube una imagen para empezar.</div>}
+                {imageSrc && (
+                  <div style={{ ...wrapperStyle, position: 'relative' }}>
+                    <img
+                      ref={imageRef}
+                      src={imageSrc}
+                      onLoad={onImageLoad}
+                      alt="Template para recortar"
+                      className="block max-h-[72vh] max-w-full select-none"
+                      style={imageExplicit}
+                      draggable={false}
+                    />
+                    <canvas
+                      ref={canvasRef}
+                      className="absolute inset-0 cursor-crosshair"
+                      onPointerDown={onPointerDown}
+                      onPointerMove={onPointerMove}
+                      onPointerUp={finishSelection}
+                      onPointerLeave={finishSelection}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           <p className="mt-3 text-sm text-violet-100/80">{instructionText}</p>
           <p className="mt-2 text-sm font-semibold text-white">{status}</p>
