@@ -1,5 +1,5 @@
 import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Eraser, ImagePlus, ScanSearch, Send } from 'lucide-react';
+import { Download, Eraser, ImagePlus, PenLine, ScanSearch, Send, X } from 'lucide-react';
 import type { ImportedCropFile } from '../types';
 
 const MEMBERS = ['rm', 'jin', 'suga', 'jhope', 'jimin', 'v', 'jungkook', 'group'] as const;
@@ -25,9 +25,11 @@ export function CropperPanel({ onSendToBulk }: Props) {
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [imageReady, setImageReady] = useState(false);
+  const [mode, setMode] = useState<'auto' | 'manual'>('auto');
   const [dragging, setDragging] = useState(false);
   const [start, setStart] = useState<{ x: number; y: number } | null>(null);
   const [selection, setSelection] = useState<Rect | null>(null);
+  const [manualDraft, setManualDraft] = useState<Rect | null>(null);
   const [detectedBoxes, setDetectedBoxes] = useState<DetectedRect[]>([]);
   const [crops, setCrops] = useState<CropItem[]>([]);
   const [padding, setPadding] = useState(2);
@@ -35,7 +37,7 @@ export function CropperPanel({ onSendToBulk }: Props) {
   const [whiteThreshold, setWhiteThreshold] = useState(245);
   const [status, setStatus] = useState('Esperando imagen.');
 
-  const canDetect = imageReady && selection && selection.w > 10 && selection.h > 10;
+  const canDetect = mode === 'auto' && imageReady && selection && selection.w > 10 && selection.h > 10;
   const canSend = crops.length > 0;
 
   useEffect(() => {
@@ -64,6 +66,7 @@ export function CropperPanel({ onSendToBulk }: Props) {
     setImageSrc(url);
     setImageReady(false);
     setSelection(null);
+    setManualDraft(null);
     setDetectedBoxes([]);
     setCrops([]);
     setStatus('Cargando imagen...');
@@ -73,7 +76,11 @@ export function CropperPanel({ onSendToBulk }: Props) {
     setImageReady(true);
     requestAnimationFrame(() => {
       syncOverlaySize();
-      setStatus('Imagen cargada. Arrastra un rectángulo sobre el bloque de photocards.');
+      setStatus(
+        mode === 'manual'
+          ? 'Imagen cargada. Arrastra sobre cada photocard para marcarla.'
+          : 'Imagen cargada. Arrastra un rectángulo sobre el bloque de photocards.',
+      );
     });
   }
 
@@ -94,7 +101,7 @@ export function CropperPanel({ onSendToBulk }: Props) {
     redraw();
   }
 
-  function redraw(nextSelection = selection, nextBoxes = detectedBoxes) {
+  function redraw(nextSelection = selection, nextBoxes = detectedBoxes, nextDraft: Rect | null = null) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -116,6 +123,15 @@ export function CropperPanel({ onSendToBulk }: Props) {
       ctx.lineWidth = 2;
       ctx.stroke();
     }
+
+    if (nextDraft && nextDraft.w > 2 && nextDraft.h > 2) {
+      roundedPath(ctx, nextDraft.x, nextDraft.y, nextDraft.w, nextDraft.h, 8);
+      ctx.strokeStyle = '#86efac';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   function getPosition(evt: PointerEvent<HTMLCanvasElement>) {
@@ -133,9 +149,13 @@ export function CropperPanel({ onSendToBulk }: Props) {
     const p = getPosition(evt);
     setDragging(true);
     setStart(p);
-    const next = { x: p.x, y: p.y, w: 0, h: 0 };
-    setSelection(next);
-    redraw(next);
+    if (mode === 'auto') {
+      const next = { x: p.x, y: p.y, w: 0, h: 0 };
+      setSelection(next);
+      redraw(next);
+    } else {
+      setManualDraft({ x: p.x, y: p.y, w: 0, h: 0 });
+    }
   }
 
   function onPointerMove(evt: PointerEvent<HTMLCanvasElement>) {
@@ -147,13 +167,22 @@ export function CropperPanel({ onSendToBulk }: Props) {
       w: Math.abs(p.x - start.x),
       h: Math.abs(p.y - start.y),
     };
-    setSelection(next);
-    redraw(next);
+    if (mode === 'auto') {
+      setSelection(next);
+      redraw(next);
+    } else {
+      setManualDraft(next);
+      redraw(selection, detectedBoxes, next);
+    }
   }
 
   function finishSelection() {
     if (!dragging) return;
     setDragging(false);
+    if (mode === 'manual') {
+      finishManualCrop();
+      return;
+    }
     if (!selection || selection.w < 10 || selection.h < 10) {
       setSelection(null);
       redraw(null);
@@ -162,12 +191,76 @@ export function CropperPanel({ onSendToBulk }: Props) {
     setStatus('Selección lista. Ahora haz clic en Detectar photocards.');
   }
 
+  function finishManualCrop() {
+    const draft = manualDraft;
+    setManualDraft(null);
+    if (!draft || draft.w < 10 || draft.h < 10) {
+      redraw(selection, detectedBoxes, null);
+      return;
+    }
+
+    const image = imageRef.current;
+    const canvas = canvasRef.current;
+    if (!image || !canvas) return;
+
+    const scaleX = image.naturalWidth / canvas.width;
+    const scaleY = image.naturalHeight / canvas.height;
+
+    const naturalX = Math.round(draft.x * scaleX);
+    const naturalY = Math.round(draft.y * scaleY);
+    const naturalW = Math.round(draft.w * scaleX);
+    const naturalH = Math.round(draft.h * scaleY);
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = naturalW;
+    cropCanvas.height = naturalH;
+    cropCanvas.getContext('2d')?.drawImage(image, naturalX, naturalY, naturalW, naturalH, 0, 0, naturalW, naturalH);
+
+    const newIndex = crops.length;
+    const member = MEMBERS[newIndex] || 'rm';
+    const newCrop: CropItem = {
+      index: newIndex,
+      member,
+      filename: `${member}.png`,
+      url: cropCanvas.toDataURL('image/png'),
+    };
+    const newBox: DetectedRect = {
+      x: naturalX,
+      y: naturalY,
+      w: naturalW,
+      h: naturalH,
+      dx: draft.x,
+      dy: draft.y,
+      dw: draft.w,
+      dh: draft.h,
+    };
+
+    const nextCrops = recomputeFilenames([...crops, newCrop]);
+    const nextBoxes = [...detectedBoxes, newBox];
+    setCrops(nextCrops);
+    setDetectedBoxes(nextBoxes);
+    redraw(selection, nextBoxes, null);
+    setStatus(`Photocard marcada manualmente (${nextCrops.length} total). Sigue arrastrando para añadir más.`);
+  }
+
   function clearAll() {
     setSelection(null);
+    setManualDraft(null);
     setDetectedBoxes([]);
     setCrops([]);
     redraw(null, []);
     setStatus(imageReady ? 'Selección limpiada.' : 'Esperando imagen.');
+  }
+
+  function deleteCrop(cropIndex: number) {
+    const nextCrops = recomputeFilenames(
+      crops.filter((_, i) => i !== cropIndex).map((c, i) => ({ ...c, index: i })),
+    );
+    const nextBoxes = detectedBoxes.filter((_, i) => i !== cropIndex);
+    setCrops(nextCrops);
+    setDetectedBoxes(nextBoxes);
+    redraw(selection, nextBoxes);
+    setStatus(`Recorte eliminado. Quedan ${nextCrops.length} photocards.`);
   }
 
   function detectCards() {
@@ -289,14 +382,14 @@ export function CropperPanel({ onSendToBulk }: Props) {
       });
     }
 
-    setCrops(nextCrops);
+    setCrops(recomputeFilenames(nextCrops));
     setDetectedBoxes(nextBoxes);
     redraw(selection, nextBoxes);
     setStatus(nextCrops.length ? `Listo. Detecté ${nextCrops.length} photocards. Revisa el miembro de cada recorte antes de descargar o enviar.` : 'No detecté photocards. Prueba una selección más ajustada o baja el Min area.');
   }
 
   function updateCropMember(index: number, member: string) {
-    setCrops((current) => current.map((crop) => crop.index === index ? { ...crop, member, filename: `${member}.png` } : crop));
+    setCrops((current) => recomputeFilenames(current.map((crop) => crop.index === index ? { ...crop, member } : crop)));
   }
 
   function downloadOne(crop: CropItem) {
@@ -317,6 +410,10 @@ export function CropperPanel({ onSendToBulk }: Props) {
     onSendToBulk(cropFiles);
   }
 
+  const instructionText = mode === 'manual'
+    ? 'Modo manual: arrastra sobre cada photocard individualmente para marcarla.'
+    : 'Flujo: subir imagen → arrastrar selección sobre las PCs → detectar → revisar nombres → enviar a carga masiva.';
+
   return (
     <section className="grid xl:grid-cols-[1.35fr_0.8fr] gap-6">
       <div className="rounded-[2rem] border border-violet-300/20 bg-[#210c36]/85 shadow-2xl shadow-black/20 backdrop-blur p-6 text-violet-50">
@@ -327,14 +424,33 @@ export function CropperPanel({ onSendToBulk }: Props) {
           </p>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <div className="flex overflow-hidden rounded-2xl border border-violet-200/20">
+            <button
+              type="button"
+              onClick={() => setMode('auto')}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold transition ${mode === 'auto' ? 'bg-fuchsia-700 text-white' : 'bg-violet-950/70 text-violet-300 hover:bg-violet-900/50'}`}
+            >
+              <ScanSearch size={15} /> Auto
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('manual')}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-bold transition ${mode === 'manual' ? 'bg-emerald-600 text-white' : 'bg-violet-950/70 text-violet-300 hover:bg-violet-900/50'}`}
+            >
+              <PenLine size={15} /> Manual
+            </button>
+          </div>
+
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-violet-200/20 bg-violet-900/70 px-4 py-3 text-sm font-bold text-white transition hover:bg-violet-800">
             <ImagePlus size={18} /> Subir template
             <input className="hidden" type="file" accept="image/*" onChange={handleFile} />
           </label>
-          <button type="button" disabled={!canDetect} onClick={detectCards} className="inline-flex items-center gap-2 rounded-2xl border border-violet-200/20 bg-fuchsia-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-45">
-            <ScanSearch size={18} /> Detectar photocards
-          </button>
+          {mode === 'auto' && (
+            <button type="button" disabled={!canDetect} onClick={detectCards} className="inline-flex items-center gap-2 rounded-2xl border border-violet-200/20 bg-fuchsia-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-45">
+              <ScanSearch size={18} /> Detectar photocards
+            </button>
+          )}
           <button type="button" onClick={clearAll} className="inline-flex items-center gap-2 rounded-2xl border border-violet-200/20 bg-violet-950/70 px-4 py-3 text-sm font-bold text-white">
             <Eraser size={18} /> Limpiar
           </button>
@@ -359,7 +475,7 @@ export function CropperPanel({ onSendToBulk }: Props) {
               onPointerLeave={finishSelection}
             />
           </div>
-          <p className="mt-3 text-sm text-violet-100/80">Flujo: subir imagen → arrastrar selección sobre las PCs → detectar → revisar nombres → enviar a carga masiva.</p>
+          <p className="mt-3 text-sm text-violet-100/80">{instructionText}</p>
           <p className="mt-2 text-sm font-semibold text-white">{status}</p>
         </div>
       </div>
@@ -368,8 +484,12 @@ export function CropperPanel({ onSendToBulk }: Props) {
         <div className="rounded-[2rem] border border-violet-300/20 bg-[#31124f]/90 p-6 text-violet-50 shadow-xl shadow-black/10">
           <h3 className="text-xl font-black">Ajustes</h3>
           <Range label="Padding" value={padding} min={0} max={30} onChange={setPadding} suffix="px" />
-          <NumberField label="Min area" value={minArea} onChange={setMinArea} min={1000} step={1000} />
-          <NumberField label="White threshold" value={whiteThreshold} onChange={setWhiteThreshold} min={180} max={254} />
+          {mode === 'auto' && (
+            <>
+              <NumberField label="Min area" value={minArea} onChange={setMinArea} min={1000} step={1000} />
+              <NumberField label="White threshold" value={whiteThreshold} onChange={setWhiteThreshold} min={180} max={254} />
+            </>
+          )}
           <div className="mt-4 rounded-2xl border border-violet-200/15 bg-violet-900/35 px-4 py-3 text-xs leading-5 text-violet-100">
             Opciones de nombre: rm, jin, suga, jhope, jimin, v, jungkook, group.
           </div>
@@ -381,9 +501,19 @@ export function CropperPanel({ onSendToBulk }: Props) {
             <p className="mt-3 text-sm text-violet-100/75">Aquí aparecerán las photocards detectadas.</p>
           ) : (
             <div className="mt-4 grid max-h-[70vh] grid-cols-2 gap-3 overflow-auto pr-1 max-sm:grid-cols-1">
-              {crops.map((crop) => (
+              {crops.map((crop, i) => (
                 <article key={crop.index} className="rounded-3xl border border-violet-200/15 bg-violet-950/45 p-3">
-                  <img src={crop.url} alt={crop.filename} className="aspect-[2.8/4] w-full rounded-2xl object-cover" />
+                  <div className="relative">
+                    <img src={crop.url} alt={crop.filename} className="aspect-[2.8/4] w-full rounded-2xl object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => deleteCrop(i)}
+                      className="absolute right-1.5 top-1.5 rounded-full bg-black/60 p-1 text-white/80 hover:bg-red-600/80 hover:text-white transition"
+                      title="Eliminar recorte"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                   <label className="mt-3 block text-xs font-bold text-violet-100">
                     Miembro
                     <select className="mt-1 w-full rounded-xl border border-violet-200/15 bg-[#230c38] px-3 py-2 text-sm text-white outline-none" value={crop.member} onChange={(e) => updateCropMember(crop.index, e.target.value)}>
@@ -475,6 +605,16 @@ function orderBoxes(boxes: Rect[]) {
     row.y = (row.y + box.y) / 2;
   }
   return rows.flatMap((row) => row.items.sort((a, b) => a.x - b.x));
+}
+
+function recomputeFilenames(items: CropItem[]): CropItem[] {
+  const seen: Record<string, number> = {};
+  return items.map((item) => {
+    seen[item.member] = (seen[item.member] || 0) + 1;
+    const n = seen[item.member];
+    const filename = n === 1 ? `${item.member}.png` : `${item.member}_${n}.png`;
+    return { ...item, filename };
+  });
 }
 
 function dataUrlToFile(dataUrl: string, filename: string) {

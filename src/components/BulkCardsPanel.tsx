@@ -73,9 +73,10 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, collect
 
   const generatedRows: CardInsert[] = useMemo(() => {
     const normalizedBasePath = cleanPath(basePath);
-    return selectedMembers.map((m) => {
+    return selectedMembers.flatMap((m) => {
       const isGroup = Boolean(m.isGroup);
-      return {
+      const memberBase = m.fileName.replace('.png', '');
+      const baseRow: CardInsert = {
         album_id: Number(albumId),
         version_id: versionId ? Number(versionId) : null,
         category_id: Number(categoryId),
@@ -94,8 +95,22 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, collect
         is_visible: true,
         card_set_id: cardSetId ? Number(cardSetId) : null,
       };
+
+      const extraRows: CardInsert[] = [];
+      let n = 2;
+      while (files[`${memberBase}_${n}.png`]) {
+        extraRows.push({
+          ...baseRow,
+          card_name: isGroup ? `${groupCardName} ${n}` : `${m.member} ${cardName} ${n}`,
+          code: [codeBase, m.codePart, suffix, String(n)].filter(Boolean).join('-').toUpperCase(),
+          image_path: `${normalizedBasePath}/${memberBase}_${n}.png`,
+        });
+        n++;
+      }
+
+      return [baseRow, ...extraRows];
     });
-  }, [albumId, versionId, categoryId, cardSetId, basePath, selectedMembers, codeBase, suffix, cardName, groupCardName, rarity, releaseDate, notes]);
+  }, [albumId, versionId, categoryId, cardSetId, basePath, selectedMembers, codeBase, suffix, cardName, groupCardName, rarity, releaseDate, notes, files]);
 
   function onFiles(e: ChangeEvent<HTMLInputElement>) {
     const incoming = Array.from(e.target.files || []);
@@ -103,8 +118,14 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, collect
 
     for (const file of incoming) {
       const lower = file.name.toLowerCase();
-      const match = selectedMembers.find((m) => lower === m.fileName);
-      if (match) next[match.fileName.toLowerCase()] = file;
+      if (selectedMembers.some((m) => lower === m.fileName)) {
+        next[lower] = file;
+      } else {
+        const numMatch = lower.match(/^([a-z]+)_(\d+)\.png$/);
+        if (numMatch && selectedMembers.some((m) => m.fileName === `${numMatch[1]}.png`)) {
+          next[lower] = file;
+        }
+      }
     }
 
     setFiles(next);
@@ -133,17 +154,27 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, collect
       return;
     }
 
+    const rowsToSave = generatedRows.filter((row) => {
+      const fileName = row.image_path.split('/').pop() || '';
+      return Boolean(files[fileName.toLowerCase()]);
+    });
+
+    if (!rowsToSave.length) {
+      setMessage('No hay imágenes seleccionadas para subir.');
+      return;
+    }
+
     setToastStatus('saving');
     try {
       await uploadImages();
 
       const { error } = await supabase
         .from('cards')
-        .upsert(generatedRows, { onConflict: 'code' });
+        .upsert(rowsToSave, { onConflict: 'code' });
 
       if (error) throw error;
       setToastStatus('success');
-      setMessage(`Listo: ${generatedRows.length} cards guardadas. Las imágenes seleccionadas también se subieron.`);
+      setMessage(`Listo: ${rowsToSave.length} cards guardadas.`);
     } catch (err) {
       setToastStatus(null);
       setMessage(err instanceof Error ? err.message : 'Error desconocido');
@@ -152,7 +183,7 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, collect
 
   return (
     <>
-    <SaveToast status={toastStatus} onClose={closeToast} message={toastStatus === 'success' ? `¡${generatedRows.length} cards guardadas!` : undefined} />
+    <SaveToast status={toastStatus} onClose={closeToast} />
     <section className="grid xl:grid-cols-[420px_1fr] gap-6">
       <form onSubmit={submit} className="admin-card p-6 space-y-4">
         <h2 className="text-xl font-black text-white">Carga masiva de photocards</h2>
@@ -200,7 +231,7 @@ export function BulkCardsPanel({ albums, versions, categories, cardSets, collect
         <label className="block rounded-3xl border-2 border-dashed border-violet-200/20 bg-violet-100/10 p-5 text-center cursor-pointer">
           <ImagePlus className="mx-auto text-violet-50 mb-2" />
           <span className="font-bold text-violet-50">Seleccionar imágenes</span>
-          <p className="text-xs text-violet-100/65 mt-1">Nombres esperados: rm.png, jin.png, suga.png, jhope.png, jimin.png, v.png, jungkook.png, group.png</p>
+          <p className="text-xs text-violet-100/65 mt-1">Nombres esperados: rm.png, suga.png… Para múltiples del mismo miembro: suga_2.png, group_2.png, group_3.png…</p>
           <input className="hidden" type="file" accept="image/*" multiple onChange={onFiles} />
         </label>
 
