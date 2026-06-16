@@ -26,13 +26,55 @@ function toPath(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, '_');
 }
 
+/** Reemplaza guion en/em dash (y variantes unicode) por guion normal "-". */
+function normalizeDashes(s: string) {
+  return s.replace(/[\u2010-\u2015]/g, '-');
+}
+
+/** Nombre de card por defecto según la categoría, cuando no hay un Card Set que lo sugiera. */
+const CATEGORY_DEFAULT_NAMES: Record<string, string> = {
+  album_pc: 'Album Photocard',
+  pob: 'POB PC',
+  lucky_draw: 'Lucky Draw PC',
+  exclusive: 'Exclusive PC',
+  vinyl_pc: 'Vinyl PC',
+  album_pola: 'Polaroid',
+};
+
+/** Rareza por defecto según la categoría. */
+const CATEGORY_DEFAULT_RARITY: Record<string, string> = {
+  lucky_draw: 'Rare',
+  exclusive: 'Rare',
+};
+
+/** Quita ocurrencias (palabra completa, sin distinguir mayúsculas) de `tokens` dentro de `text`. */
+function stripTokens(text: string, tokens: (string | null | undefined)[]): string {
+  let result = text;
+  const ordered = (tokens.filter(Boolean) as string[]).sort((a, b) => b.length - a.length);
+  for (const token of ordered) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), '');
+  }
+  return result.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Deriva el "descriptor" propio de un Card Set, quitando del nombre del set
+ * las partes que ya identifican álbum/versión y el sufijo genérico "PC(s)".
+ *
+ * Ej: name="BE Deluxe JPFC Lucky Draw PCs", album.short_name="BE", version.short_name="Deluxe"
+ *     → "JPFC Lucky Draw"
+ */
+function deriveSetDescriptor(cardSet: CardSet, album?: Album, version?: AlbumVersion | null): string {
+  const tokens = [album?.short_name, album?.name, version?.short_name, version?.name];
+  const stripped = stripTokens(cardSet.name, tokens);
+  return stripped.replace(/\s+PCs?$/i, '').trim();
+}
+
 /**
  * Genera la ruta única de imagen para una card.
- * Estructura: {type}/{era}/{album}/{category}/{version_or_set}/{memberFileName}
- *
- * Si versionShort está presente → se usa como última carpeta.
- * Si no → se usa cardSetShort como última carpeta.
- * Si ninguno → la ruta termina en la carpeta de categoría.
+ * Estructura: {type}/{era}/{album}/{category}/{version}/{cardSet}/{memberFileName}
+ * (las carpetas de versión y card set se agregan solo si están presentes; ambas pueden coexistir).
  */
 export function generateCardImagePath({
   collectionTypeShort,
@@ -51,18 +93,13 @@ export function generateCardImagePath({
   cardSetShort: string | null;
   memberFileName: string;
 }): string {
-  const subfolder = versionShort
-    ? toPath(versionShort)
-    : cardSetShort
-    ? toPath(cardSetShort)
-    : null;
-
   const parts = [
     toPath(collectionTypeShort),
     toPath(eraShort),
     toPath(albumShort),
     toPath(categoryShort),
-    subfolder,
+    versionShort ? toPath(versionShort) : null,
+    cardSetShort ? toPath(cardSetShort) : null,
   ].filter(Boolean) as string[];
 
   return `${parts.join('/')}/${memberFileName}`;
@@ -124,7 +161,22 @@ export function BulkCardsPanel({
   /** El álbum tiene versiones definidas → la versión es importante para generar rutas únicas. */
   const albumHasVersions = albumVersions.length > 0;
 
-  // Auto-generar basePath, codeBase y suffix al cambiar álbum/versión/categoría/set
+  // Al seleccionar un Card Set, sincronizar álbum/versión/categoría desde ese set:
+  // si el set define version_id o category_id, esos valores son la fuente de verdad.
+  useEffect(() => {
+    if (!cardSet) return;
+    if (cardSet.album_id != null && String(cardSet.album_id) !== albumId) {
+      setAlbumId(String(cardSet.album_id));
+    }
+    if (cardSet.version_id != null && String(cardSet.version_id) !== versionId) {
+      setVersionId(String(cardSet.version_id));
+    }
+    if (cardSet.category_id != null && String(cardSet.category_id) !== categoryId) {
+      setCategoryId(String(cardSet.category_id));
+    }
+  }, [cardSet]);
+
+  // Auto-sugerir basePath, codeBase, suffix, card name y rareza al cambiar álbum/versión/categoría/set
   useEffect(() => {
     if (!albumId || !categoryId) return;
 
@@ -133,24 +185,49 @@ export function BulkCardsPanel({
     const albumPart = album ? toPath(album.short_name || album.name) : 'unknown';
     const catPart = category ? toPath(category.short_name || category.name) : 'unknown';
 
-    // Última carpeta: versión si está seleccionada, si no, card set
-    const lastPart = version
-      ? toPath(version.short_name || version.name)
-      : cardSet
-      ? toPath(cardSet.short_name)
-      : null;
+    // La ruta incluye versión y card set como carpetas independientes (ambas pueden coexistir)
+    const versionPart = version ? toPath(version.short_name || version.name) : null;
+    const cardSetPart = cardSet ? toPath(cardSet.short_name) : null;
 
-    const newBasePath = [typePart, eraPart, albumPart, catPart, lastPart].filter(Boolean).join('/');
+    const newBasePath = [typePart, eraPart, albumPart, catPart, versionPart, cardSetPart]
+      .filter(Boolean)
+      .join('/');
     setBasePath(newBasePath);
 
-    if (album?.short_name) {
-      setCodeBase(album.short_name.toUpperCase().replace(/[-_]/g, ''));
+    // Código base: álbum + versión (si existe), p.ej. "BE-DELUXE"
+    const albumCode = album?.short_name ? album.short_name.toUpperCase().replace(/[-_]+/g, '') : '';
+    const versionCode = version?.short_name ? version.short_name.toUpperCase().replace(/[-_]+/g, '') : '';
+    const codeBaseSuggestion = [albumCode, versionCode].filter(Boolean).join('-');
+    if (codeBaseSuggestion) {
+      setCodeBase(normalizeDashes(codeBaseSuggestion));
     }
+
     if (album?.release_date) {
       setReleaseDate(album.release_date.slice(0, 10));
     }
-    if (category?.short_name) {
-      setSuffix(category.short_name.toUpperCase().replace(/[\s_]+/g, '-'));
+
+    // Descriptor propio del card set (p.ej. "JPFC Lucky Draw"), usado para sugerir suffix y card name
+    const descriptor = cardSet ? deriveSetDescriptor(cardSet, album, version) : '';
+
+    const suffixSuggestion = descriptor
+      ? descriptor.toUpperCase().replace(/[\s_]+/g, '-')
+      : category?.short_name
+      ? category.short_name.toUpperCase().replace(/[\s_]+/g, '-')
+      : '';
+    if (suffixSuggestion) {
+      setSuffix(normalizeDashes(suffixSuggestion));
+    }
+
+    const categoryDefaultName = category?.short_name ? CATEGORY_DEFAULT_NAMES[category.short_name] : undefined;
+    const cardNameSuggestion = descriptor ? `${descriptor} PC` : categoryDefaultName;
+    if (cardNameSuggestion) {
+      setCardName(cardNameSuggestion);
+      setGroupCardName(`Group ${cardNameSuggestion}`);
+    }
+
+    const raritySuggestion = category?.short_name ? CATEGORY_DEFAULT_RARITY[category.short_name] : undefined;
+    if (raritySuggestion) {
+      setRarity(raritySuggestion);
     }
   }, [albumId, versionId, categoryId, cardSetId, album, version, category, cardSet, collectionType, era]);
 
@@ -158,17 +235,14 @@ export function BulkCardsPanel({
 
   const generatedRows: CardInsert[] = useMemo(() => {
     const normalizedBasePath = cleanPath(basePath);
-
-    // Parte del código que identifica la versión
-    const versionCodePart = version
-      ? (version.short_name || version.name).toUpperCase().replace(/[\s_]+/g, '-')
-      : null;
+    const retailer = cardSet?.retailer ?? null;
 
     return selectedMembers.flatMap((m) => {
       const isGroup = Boolean(m.isGroup);
       const memberBase = m.fileName.replace('.png', '');
 
-      const codeParts = [codeBase, versionCodePart, m.codePart, suffix].filter(Boolean) as string[];
+      // Estructura: {codigoBase}-{MEMBER_CODE}-{suffixCodigo}
+      const codeParts = [codeBase, m.codePart, suffix].filter(Boolean) as string[];
 
       const baseRow: CardInsert = {
         album_id: Number(albumId),
@@ -177,9 +251,9 @@ export function BulkCardsPanel({
         member: m.member,
         member_full_name: m.fullName,
         member_emoji: m.emoji,
-        retailer: null,
+        retailer,
         card_name: isGroup ? groupCardName : `${m.member} ${cardName}`,
-        code: codeParts.join('-').toUpperCase(),
+        code: normalizeDashes(codeParts.join('-')).toUpperCase(),
         image_path: `${normalizedBasePath}/${m.fileName}`,
         rarity,
         is_group: isGroup,
@@ -193,11 +267,11 @@ export function BulkCardsPanel({
       const extraRows: CardInsert[] = [];
       let n = 2;
       while (files[`${memberBase}_${n}.png`]) {
-        const extraCodeParts = [codeBase, versionCodePart, m.codePart, suffix, String(n)].filter(Boolean) as string[];
+        const extraCodeParts = [codeBase, m.codePart, suffix, String(n)].filter(Boolean) as string[];
         extraRows.push({
           ...baseRow,
           card_name: isGroup ? `${groupCardName} ${n}` : `${m.member} ${cardName} ${n}`,
-          code: extraCodeParts.join('-').toUpperCase(),
+          code: normalizeDashes(extraCodeParts.join('-')).toUpperCase(),
           image_path: `${normalizedBasePath}/${memberBase}_${n}.png`,
         });
         n++;
@@ -206,7 +280,7 @@ export function BulkCardsPanel({
       return [baseRow, ...extraRows];
     });
   }, [
-    albumId, versionId, categoryId, cardSetId, basePath, version,
+    albumId, versionId, categoryId, cardSetId, basePath, cardSet,
     selectedMembers, codeBase, suffix, cardName, groupCardName, rarity, releaseDate, notes, files,
   ]);
 
@@ -290,8 +364,27 @@ export function BulkCardsPanel({
     e.preventDefault();
     setMessage(null);
 
-    if (!albumId || !categoryId) {
-      setMessage('Selecciona álbum y categoría.');
+    const errors: string[] = [];
+    if (!albumId) errors.push('Selecciona un álbum.');
+    if (!cardSetId) errors.push('Selecciona un Card Set.');
+    if (!categoryId) errors.push('Selecciona una categoría.');
+    if (!basePath.trim()) errors.push('El Base path Storage es obligatorio.');
+    if (!codeBase.trim()) errors.push('El código base es obligatorio.');
+    if (!suffix.trim()) errors.push('El suffix de código es obligatorio.');
+    if (!rarity) errors.push('Selecciona una rareza.');
+    if (!cardName.trim()) errors.push('El Card name es obligatorio.');
+    if (includeGroup && !files['group.png']) {
+      errors.push('Incluiste Group/BTS pero no seleccionaste group.png.');
+    }
+    if (cardSet?.version_id != null && versionId && Number(versionId) !== cardSet.version_id) {
+      errors.push('La versión seleccionada no coincide con la versión del Card Set.');
+    }
+    if (cardSet?.category_id != null && categoryId && Number(categoryId) !== cardSet.category_id) {
+      errors.push('La categoría seleccionada no coincide con la categoría del Card Set.');
+    }
+
+    if (errors.length) {
+      setMessage(errors.join(' '));
       return;
     }
 
@@ -383,6 +476,7 @@ export function BulkCardsPanel({
             label={albumHasVersions ? 'Versión (recomendada para este álbum)' : 'Versión'}
             value={versionId}
             onChange={setVersionId}
+            disabled={cardSet?.version_id != null}
           >
             <option value="">Sin versión</option>
             {albumVersions.map((v) => (
@@ -398,12 +492,22 @@ export function BulkCardsPanel({
             </p>
           )}
 
-          <Select label="Card Set (opcional)" value={cardSetId} onChange={setCardSetId}>
-            <option value="">Sin set</option>
+          <Select label="Card Set" value={cardSetId} onChange={setCardSetId} required>
+            <option value="">Seleccionar</option>
             {albumCardSets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
+          <p className="text-xs text-violet-100/55 -mt-2">
+            Al elegir un Card Set se sincronizan automáticamente versión, categoría y se sugieren
+            código base, suffix, card name y rareza.
+          </p>
 
-          <Select label="Categoría" value={categoryId} onChange={setCategoryId} required>
+          <Select
+            label="Categoría"
+            value={categoryId}
+            onChange={setCategoryId}
+            required
+            disabled={cardSet?.category_id != null}
+          >
             <option value="">Seleccionar</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
@@ -463,7 +567,8 @@ export function BulkCardsPanel({
         <div className="admin-card p-6 min-w-0">
           <h2 className="text-xl font-black text-white mb-1">Preview antes de guardar</h2>
           <p className="text-sm text-violet-100/65 mb-4">
-            Upsert por <code>code</code>. El código incluye la versión para evitar duplicados entre versiones.
+            Upsert por <code>code</code>. Estructura: <code>CODIGO_BASE-MIEMBRO-SUFFIX</code>
+            (el código base ya incluye la versión cuando corresponde).
           </p>
 
           <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -489,6 +594,11 @@ export function BulkCardsPanel({
                     <div className="font-bold text-white text-sm">{row.member} · {row.card_name}</div>
                     <div className="text-xs text-violet-100/65 break-all font-mono">{row.code}</div>
                     <div className="text-xs text-violet-100/50 break-all font-mono">{row.image_path}</div>
+                    <div className="text-[11px] text-violet-100/45 mt-1 space-y-0.5">
+                      <div>Álbum: {album?.name ?? '—'}{version ? ` · Versión: ${version.name}` : ''}</div>
+                      <div>Categoría: {category?.name ?? '—'}{cardSet ? ` · Card Set: ${cardSet.name}` : ''}</div>
+                      <div>Rareza: {row.rarity}</div>
+                    </div>
                   </div>
                 </article>
               );
@@ -528,20 +638,22 @@ function Field({
 }
 
 function Select({
-  label, value, onChange, children, required,
+  label, value, onChange, children, required, disabled,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   children: React.ReactNode;
   required?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <label className="block">
       <span className="label">{label}</span>
       <select
         required={required}
-        className="input"
+        disabled={disabled}
+        className="input disabled:opacity-60"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
