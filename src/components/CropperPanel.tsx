@@ -147,6 +147,8 @@ export function CropperPanel({ onSendToBulk }: Props) {
 
   function onPointerDown(evt: PointerEvent<HTMLCanvasElement>) {
     if (!imageReady) return;
+    evt.preventDefault();
+    evt.currentTarget.setPointerCapture(evt.pointerId);
     const p = getPosition(evt);
     setDragging(true);
     setStart(p);
@@ -161,6 +163,7 @@ export function CropperPanel({ onSendToBulk }: Props) {
 
   function onPointerMove(evt: PointerEvent<HTMLCanvasElement>) {
     if (!dragging || !start) return;
+    evt.preventDefault();
     const p = getPosition(evt);
     const next = {
       x: Math.min(start.x, p.x),
@@ -516,7 +519,8 @@ export function CropperPanel({ onSendToBulk }: Props) {
                     />
                     <canvas
                       ref={canvasRef}
-                      className="absolute inset-0 cursor-crosshair"
+                      className="absolute inset-0 cursor-crosshair touch-none"
+                      style={{ touchAction: 'none' }}
                       onPointerDown={onPointerDown}
                       onPointerMove={onPointerMove}
                       onPointerUp={finishSelection}
