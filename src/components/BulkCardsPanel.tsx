@@ -9,6 +9,40 @@ import type {
 
 const RARITIES = ['Common', 'Rare', 'Ultra Rare', 'Limited'] as const;
 
+/** Las imágenes solo se ven como referencia dentro de la app, nunca se descargan. */
+const MAX_IMAGE_WIDTH = 160;
+const MAX_IMAGE_HEIGHT = 240;
+
+/** Redimensiona `file` para que quepa dentro de maxWidth×maxHeight (sin recortar ni estirar). */
+async function resizeImageFile(file: File, maxWidth: number, maxHeight: number): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(maxWidth / bitmap.width, maxHeight / bitmap.height, 1);
+  if (scale === 1) {
+    bitmap.close();
+    return file;
+  }
+
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    bitmap.close();
+    return file;
+  }
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  const type = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.9));
+  if (!blob) return file;
+
+  return new File([blob], file.name, { type });
+}
+
 type Props = {
   albums: Album[];
   versions: AlbumVersion[];
@@ -334,9 +368,11 @@ export function BulkCardsPanel({
       const file = files[fileName.toLowerCase()];
       if (!file) continue;
 
+      const resized = await resizeImageFile(file, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
+
       const { error } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)
-        .upload(row.image_path, file, { cacheControl: '3600', upsert: true });
+        .upload(row.image_path, resized, { cacheControl: '3600', upsert: true });
 
       if (error) throw new Error(`Error subiendo ${fileName}: ${error.message}`);
     }
