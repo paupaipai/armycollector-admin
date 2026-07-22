@@ -142,6 +142,8 @@ export function generateCardImagePath({
 export function BulkCardsPanel({
   albums, versions, categories, cardSets, collectionTypes, albumEras, importedFiles = [],
 }: Props) {
+  const [filterTypeId, setFilterTypeId] = useState('');
+  const [filterEraId, setFilterEraId] = useState('');
   const [albumId, setAlbumId] = useState('');
   const [versionId, setVersionId] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -174,6 +176,35 @@ export function BulkCardsPanel({
       return next;
     });
   }, [importedFiles]);
+
+  // Filtros para acotar la lista de álbumes (Tipo → Era → Álbum)
+  const filteredEras = useMemo(
+    () => (filterTypeId ? albumEras.filter((e) => String(e.collection_type_id) === filterTypeId) : albumEras),
+    [albumEras, filterTypeId],
+  );
+  const filteredAlbums = useMemo(
+    () => albums.filter((a) => {
+      if (filterTypeId && String(a.collection_type_id ?? '') !== filterTypeId) return false;
+      if (filterEraId && String(a.era_id ?? '') !== filterEraId) return false;
+      return true;
+    }),
+    [albums, filterTypeId, filterEraId],
+  );
+
+  function onFilterTypeChange(v: string) {
+    setFilterTypeId(v);
+    setFilterEraId('');
+    setAlbumId('');
+    setVersionId('');
+    setCardSetId('');
+  }
+
+  function onFilterEraChange(v: string) {
+    setFilterEraId(v);
+    setAlbumId('');
+    setVersionId('');
+    setCardSetId('');
+  }
 
   // Entidades derivadas
   const album = useMemo(() => albums.find((a) => String(a.id) === albumId), [albums, albumId]);
@@ -498,6 +529,16 @@ export function BulkCardsPanel({
         <form onSubmit={submit} className="admin-card p-6 space-y-4">
           <h2 className="text-xl font-black text-white">Carga masiva de photocards</h2>
 
+          <Select label="Tipo" value={filterTypeId} onChange={onFilterTypeChange}>
+            <option value="">Todos</option>
+            {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </Select>
+
+          <Select label="Era" value={filterEraId} onChange={onFilterEraChange}>
+            <option value="">Todas</option>
+            {filteredEras.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </Select>
+
           <Select
             label="Álbum"
             value={albumId}
@@ -505,7 +546,7 @@ export function BulkCardsPanel({
             required
           >
             <option value="">Seleccionar</option>
-            {albums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {filteredAlbums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Select>
 
           <Select

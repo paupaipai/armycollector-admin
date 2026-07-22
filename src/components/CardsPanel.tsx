@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Album, AlbumVersion, Card, CardCategory, CardSet } from '../types';
+import type { Album, AlbumEra, AlbumVersion, Card, CardCategory, CardSet, CollectionType } from '../types';
 import { STORAGE_BUCKET, supabase } from '../lib/supabase';
 
 function getImageUrl(imagePath: string): string {
@@ -14,34 +14,76 @@ type Props = {
   categories: CardCategory[];
   cardSets: CardSet[];
   cards: Card[];
+  collectionTypes: CollectionType[];
+  albumEras: AlbumEra[];
   onChanged: () => Promise<void>;
 };
 
-export function CardsPanel({ albums, versions, categories, cardSets, cards }: Props) {
+export function CardsPanel({ albums, versions, categories, cardSets, cards, collectionTypes, albumEras }: Props) {
   const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [eraFilter, setEraFilter] = useState('');
   const [albumFilter, setAlbumFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  const albumsById = useMemo(() => new Map(albums.map((a) => [a.id, a])), [albums]);
+
+  const filteredEras = useMemo(
+    () => (typeFilter ? albumEras.filter((e) => String(e.collection_type_id) === typeFilter) : albumEras),
+    [albumEras, typeFilter],
+  );
+
+  const filteredAlbums = useMemo(
+    () => albums.filter((a) => {
+      if (typeFilter && String(a.collection_type_id ?? '') !== typeFilter) return false;
+      if (eraFilter && String(a.era_id ?? '') !== eraFilter) return false;
+      return true;
+    }),
+    [albums, typeFilter, eraFilter],
+  );
+
+  function onTypeFilterChange(v: string) {
+    setTypeFilter(v);
+    setEraFilter('');
+    setAlbumFilter('');
+  }
+
+  function onEraFilterChange(v: string) {
+    setEraFilter(v);
+    setAlbumFilter('');
+  }
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return cards.filter((c) => {
+      const album = albumsById.get(c.album_id);
+      if (typeFilter && String(album?.collection_type_id ?? '') !== typeFilter) return false;
+      if (eraFilter && String(album?.era_id ?? '') !== eraFilter) return false;
       if (albumFilter && String(c.album_id) !== albumFilter) return false;
       if (categoryFilter && String(c.category_id) !== categoryFilter) return false;
       if (!q) return true;
       return [c.member, c.card_name, c.code, c.image_path, c.retailer, c.notes].some((v) => (v || '').toLowerCase().includes(q));
     });
-  }, [cards, search, albumFilter, categoryFilter]);
+  }, [cards, search, typeFilter, eraFilter, albumFilter, categoryFilter, albumsById]);
 
   return (
     <div className="admin-card p-6 min-w-0">
       <div className="flex flex-col gap-3 mb-4">
         <h2 className="text-xl font-black text-white">Cards</h2>
-        <div className="grid md:grid-cols-3 gap-3">
-          <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar code, miembro, path..." />
+        <div className="grid md:grid-cols-3 xl:grid-cols-5 gap-3">
+          <input className="input md:col-span-3 xl:col-span-1" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar code, miembro, path..." />
+          <select className="input" value={typeFilter} onChange={(e) => onTypeFilterChange(e.target.value)}>
+            <option value="">Todos los tipos</option>
+            {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <select className="input" value={eraFilter} onChange={(e) => onEraFilterChange(e.target.value)}>
+            <option value="">Todas las eras</option>
+            {filteredEras.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
           <select className="input" value={albumFilter} onChange={(e) => setAlbumFilter(e.target.value)}>
             <option value="">Todos los álbumes</option>
-            {albums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {filteredAlbums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
           <select className="input" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Todas las categorías</option>
