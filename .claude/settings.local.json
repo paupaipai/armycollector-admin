@@ -5,7 +5,10 @@
       "Bash(grep -E '\\\\.\\(tsx?|jsx?\\)$')",
       "Bash(npx vite:*)",
       "Bash(python3 *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(supabase functions *)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/)"
     ]
   }
 }

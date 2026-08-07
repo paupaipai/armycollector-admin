@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useMemo, useState } from 'react';
 import { Pencil, Plus, RotateCcw, Save } from 'lucide-react';
 import { supabaseAdmin as supabase } from '../lib/supabase';
 import { SaveToast } from './SaveToast';
+import { SendNotificationButton } from './SendNotificationButton';
 import type { Album, AlbumEra, CollectionType } from '../types';
 
 type Props = {
@@ -42,6 +43,9 @@ export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: P
   const [message, setMessage] = useState<string | null>(null);
   const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
   const closeToast = useCallback(() => setToastStatus(null), []);
+  const [lastSaved, setLastSaved] = useState<{ id: number; name: string } | null>(null);
+
+  const notifyTarget = editingId ? { id: editingId, name: form.name.trim() || 'Álbum' } : lastSaved;
 
   const filteredAlbums = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -125,9 +129,11 @@ export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: P
         setMessage('No se pudo actualizar. Verifica los permisos en Supabase (RLS).');
         return;
       }
+      setLastSaved({ id: editingId, name: payload.name || form.name.trim() });
     } else {
-      const { error } = await supabase.from('albums').insert(payload);
+      const { data, error } = await supabase.from('albums').insert(payload).select().single();
       if (error) { setToastStatus(null); setMessage(error.message); return; }
+      setLastSaved({ id: data.id, name: payload.name || form.name.trim() });
     }
 
     await onChanged();
@@ -195,6 +201,19 @@ export function AlbumsPanel({ albums, collectionTypes, albumEras, onChanged }: P
 
         <button className="btn-primary w-full"><Save size={18} /> {editingId ? 'Guardar cambios' : 'Guardar álbum'}</button>
         {message && <p className="text-sm text-violet-100/80">{message}</p>}
+
+        {notifyTarget && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-violet-950/40 border border-violet-200/10 p-3">
+            <p className="text-xs text-violet-100/70">
+              Notificar sobre <span className="font-bold text-white">{notifyTarget.name}</span>
+            </p>
+            <SendNotificationButton
+              title="¡Nuevo álbum disponible! 🎉"
+              body={`${notifyTarget.name} ya está en Purple Collector`}
+              data={{ kind: 'new_album', albumId: String(notifyTarget.id) }}
+            />
+          </div>
+        )}
       </form>
 
       <div className="admin-card p-6 min-w-0">

@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useMemo, useState } from 'react';
 import { Pencil, RotateCcw, Save } from 'lucide-react';
 import { supabaseAdmin as supabase } from '../lib/supabase';
 import { SaveToast } from './SaveToast';
+import { SendNotificationButton } from './SendNotificationButton';
 import type { Album, AlbumVersion, CardCategory, CardSet } from '../types';
 
 type Props = {
@@ -34,6 +35,11 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
   const [message, setMessage] = useState<string | null>(null);
   const [toastStatus, setToastStatus] = useState<'saving' | 'success' | null>(null);
   const closeToast = useCallback(() => setToastStatus(null), []);
+  const [lastSaved, setLastSaved] = useState<{ id: number; name: string; albumId: number } | null>(null);
+
+  const notifyTarget = editingId && form.album_id
+    ? { id: editingId, name: form.name.trim() || 'Set', albumId: Number(form.album_id) }
+    : lastSaved;
 
   const albumVersions = useMemo(
     () => versions.filter((v) => String(v.album_id) === form.album_id),
@@ -106,9 +112,11 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
         setMessage('No se pudo actualizar. Verifica los permisos en Supabase (RLS).');
         return;
       }
+      setLastSaved({ id: editingId, name: payload.name || form.name.trim(), albumId: payload.album_id });
     } else {
-      const { error } = await supabase.from('card_sets').insert(payload);
+      const { data, error } = await supabase.from('card_sets').insert(payload).select().single();
       if (error) { setToastStatus(null); setMessage(error.message); return; }
+      setLastSaved({ id: data.id, name: payload.name || form.name.trim(), albumId: payload.album_id });
     }
     await onChanged();
     setToastStatus('success');
@@ -175,6 +183,19 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
 
           <button className="btn-primary w-full"><Save size={18} /> {editingId ? 'Guardar cambios' : 'Crear set'}</button>
           {message && <p className="text-sm text-red-300">{message}</p>}
+
+          {notifyTarget && (
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-violet-950/40 border border-violet-200/10 p-3">
+              <p className="text-xs text-violet-100/70">
+                Notificar sobre <span className="font-bold text-white">{notifyTarget.name}</span>
+              </p>
+              <SendNotificationButton
+                title="¡Nuevo set de photocards disponible! 🎉"
+                body={`${notifyTarget.name} ya está en Purple Collector`}
+                data={{ kind: 'new_set', typeId: String(notifyTarget.id), albumId: String(notifyTarget.albumId) }}
+              />
+            </div>
+          )}
         </form>
 
         <div className="admin-card p-6 min-w-0">
