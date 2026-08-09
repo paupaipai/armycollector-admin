@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ImagePlus, UploadCloud } from 'lucide-react';
+import { AlertTriangle, ImagePlus, UploadCloud, X, Trash2 } from 'lucide-react';
 import { STORAGE_BUCKET, supabase, supabaseAdmin } from '../lib/supabase';
 import { BTS_GROUP, BTS_MEMBERS } from '../data/members';
 import { SaveToast } from './SaveToast';
@@ -51,6 +51,7 @@ type Props = {
   collectionTypes: CollectionType[];
   albumEras: AlbumEra[];
   importedFiles?: ImportedCropFile[];
+  onChanged?: () => Promise<void>;
 };
 
 type FileMap = Record<string, File | undefined>;
@@ -140,7 +141,7 @@ export function generateCardImagePath({
 }
 
 export function BulkCardsPanel({
-  albums, versions, categories, cardSets, collectionTypes, albumEras, importedFiles = [],
+  albums, versions, categories, cardSets, collectionTypes, albumEras, importedFiles = [], onChanged,
 }: Props) {
   const [filterTypeId, setFilterTypeId] = useState('');
   const [filterEraId, setFilterEraId] = useState('');
@@ -301,6 +302,8 @@ export function BulkCardsPanel({
   const generatedRows: CardInsert[] = useMemo(() => {
     const normalizedBasePath = cleanPath(basePath);
     const retailer = cardSet?.retailer ?? null;
+    const country = cardSet?.country ?? null;
+    const drawType = cardSet?.draw_type ?? null;
 
     return selectedMembers.flatMap((m) => {
       const isGroup = Boolean(m.isGroup);
@@ -327,6 +330,8 @@ export function BulkCardsPanel({
         notes: notes || null,
         is_visible: true,
         card_set_id: cardSetId ? Number(cardSetId) : null,
+        country,
+        draw_type: drawType,
       };
 
       const extraRows: CardInsert[] = [];
@@ -366,6 +371,21 @@ export function BulkCardsPanel({
     }
 
     setFiles(next);
+  }
+
+  /** Quita una sola imagen seleccionada (no toca lo que ya está guardado en Storage/DB). */
+  function removeFile(fileName: string) {
+    setFiles((current) => {
+      const next = { ...current };
+      delete next[fileName.toLowerCase()];
+      return next;
+    });
+  }
+
+  /** Limpia todas las imágenes seleccionadas para este lote (no toca lo ya guardado). */
+  function clearFiles() {
+    setFiles({});
+    setMessage(null);
   }
 
   /** Verifica en Storage cuáles de las rutas destino ya tienen imagen. */
@@ -419,6 +439,7 @@ export function BulkCardsPanel({
         .upsert(rowsToSave, { onConflict: 'code' });
 
       if (error) throw error;
+      await onChanged?.();
       setToastStatus('success');
       setMessage(`Listo: ${rowsToSave.length} cards guardadas.`);
     } catch (err) {
@@ -629,6 +650,16 @@ export function BulkCardsPanel({
             <input className="hidden" type="file" accept="image/*" multiple onChange={onFiles} />
           </label>
 
+          {Object.keys(files).length > 0 && (
+            <button
+              type="button"
+              onClick={clearFiles}
+              className="w-full btn-secondary flex items-center justify-center gap-2"
+            >
+              <Trash2 size={16} /> Limpiar selección ({Object.keys(files).length})
+            </button>
+          )}
+
           <button
             type="submit"
             disabled={toastStatus === 'saving'}
@@ -653,7 +684,17 @@ export function BulkCardsPanel({
               const fileName = row.image_path.split('/').pop() || '';
               const file = files[fileName.toLowerCase()];
               return (
-                <article key={row.code} className="rounded-3xl border border-violet-200/10 p-4 bg-white/10">
+                <article key={row.code} className="relative rounded-3xl border border-violet-200/10 p-4 bg-white/10">
+                  {file && (
+                    <button
+                      type="button"
+                      onClick={() => removeFile(fileName)}
+                      title="Quitar del lote"
+                      className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
                   <div className="aspect-[2.8/4] rounded-2xl bg-white/10 border border-violet-200/10 overflow-hidden flex items-center justify-center">
                     {file ? (
                       <img
@@ -675,6 +716,9 @@ export function BulkCardsPanel({
                       <div>Álbum: {album?.name ?? '—'}{version ? ` · Versión: ${version.name}` : ''}</div>
                       <div>Categoría: {category?.name ?? '—'}{cardSet ? ` · Card Set: ${cardSet.name}` : ''}</div>
                       <div>Rareza: {row.rarity}</div>
+                      {(row.country || row.draw_type) && (
+                        <div>País: {row.country ?? '—'}{row.draw_type ? ` · Draw: ${row.draw_type}` : ''}</div>
+                      )}
                     </div>
                   </div>
                 </article>

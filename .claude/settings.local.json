@@ -8,7 +8,24 @@
       "Bash(npm run *)",
       "Bash(supabase functions *)",
       "Read(//tmp/**)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(supabase --version)",
+      "Bash(supabase db *)",
+      "Bash(supabase projects *)",
+      "Bash(supabase link *)",
+      "Bash(node -e \"console.log\\(require\\('@supabase/supabase-js/package.json'\\).version\\)\")",
+      "Bash(node -e \"console.log\\(require\\('ws/package.json'\\).version\\)\")",
+      "Bash(node -e \"console.log\\(typeof WebSocket\\)\")",
+      "Bash(cd *)",
+      "Bash(lsof -ti:3000 -sTCP:LISTEN)",
+      "Bash(xargs -r kill)",
+      "Bash(disown)",
+      "Bash(timeout 30 bash -c 'until curl -sf http://localhost:3000 >/dev/null; do sleep 1; done')",
+      "Bash(curl -sf http://localhost:5174)",
+      "Bash(node -e ' *)",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(find / -maxdepth 4 -iname \"*chromium-cli*\")",
+      "Bash(npm ls *)"
     ]
   }
 }

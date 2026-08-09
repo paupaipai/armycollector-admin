@@ -52,6 +52,9 @@ export type Card = {
   created_at?: string | null;
   is_visible: boolean | null;
   card_set_id?: number | null;
+  country: string | null;
+  draw_type: string | null;
+  sort_order: number;
 };
 
 export type CardInsert = {
@@ -72,6 +75,9 @@ export type CardInsert = {
   notes: string | null;
   is_visible: boolean;
   card_set_id: number | null;
+  country: string | null;
+  draw_type: string | null;
+  sort_order?: number;
 };
 
 export type ImportedCropFile = {
@@ -114,6 +120,8 @@ export type CardSet = {
   description: string | null;
   retailer: string | null;
   round: string | null;
+  country: string | null;
+  draw_type: string | null;
   sort_order: number;
   is_active: boolean;
   created_at?: string;

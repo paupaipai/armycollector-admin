@@ -22,6 +22,8 @@ const emptyForm = {
   description: '',
   retailer: '',
   round: '',
+  country: '',
+  draw_type: '',
   sort_order: '0',
   is_active: true,
 };
@@ -82,6 +84,8 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
       description: cs.description || '',
       retailer: cs.retailer || '',
       round: cs.round || '',
+      country: cs.country || '',
+      draw_type: cs.draw_type || '',
       sort_order: String(cs.sort_order ?? 0),
       is_active: cs.is_active,
     });
@@ -100,6 +104,8 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
       description: form.description.trim() || null,
       retailer: form.retailer.trim() || null,
       round: form.round.trim() || null,
+      country: form.country.trim() || null,
+      draw_type: form.draw_type.trim() || null,
       sort_order: Number(form.sort_order) || 0,
       is_active: form.is_active,
     };
@@ -174,6 +180,10 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
             <Field label="Round" value={form.round} onChange={(v) => set('round', v)} placeholder="1" />
           </div>
           <div className="grid grid-cols-2 gap-3">
+            <Field label="País" value={form.country} onChange={(v) => set('country', v)} placeholder="KOREA" />
+            <Field label="Draw type" value={form.draw_type} onChange={(v) => set('draw_type', v)} placeholder="R1" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <Field label="Orden" value={form.sort_order} onChange={(v) => set('sort_order', v)} type="number" />
             <label className="flex items-end pb-2 gap-2 text-sm font-bold text-violet-50">
               <input type="checkbox" checked={form.is_active} onChange={(e) => set('is_active', e.target.checked)} />
@@ -218,7 +228,7 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
           <div className="rounded-3xl border border-violet-200/10">
             <table className="admin-table">
               <thead>
-                <tr><th>ID</th><th>Álbum</th><th>Versión</th><th>Categoría</th><th>Nombre</th><th>Short</th><th>Retailer</th><th>Activo</th><th></th></tr>
+                <tr><th>ID</th><th>Álbum</th><th>Versión</th><th>Categoría</th><th>Nombre</th><th>Short</th><th>Retailer</th><th>País</th><th>Draw</th><th>Activo</th><th></th></tr>
               </thead>
               <tbody>
                 {filtered.map((cs) => (
@@ -230,6 +240,8 @@ export function CardSetsPanel({ albums, versions, categories, cardSets, onChange
                     <td className="font-bold">{cs.name}</td>
                     <td>{cs.short_name}</td>
                     <td>{cs.retailer || '-'}</td>
+                    <td>{cs.country || '-'}</td>
+                    <td>{cs.draw_type || '-'}</td>
                     <td>{cs.is_active ? 'Sí' : 'No'}</td>
                     <td><button className="icon-btn" onClick={() => edit(cs)}><Pencil size={15} /> Editar</button></td>
                   </tr>
