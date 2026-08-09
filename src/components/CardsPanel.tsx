@@ -50,6 +50,8 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
   const [eraFilter, setEraFilter] = useState('');
   const [albumFilter, setAlbumFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [memberFilter, setMemberFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState<'' | 'group' | 'solo'>('');
   const [sortBy, setSortBy] = useState<'id' | 'sort_order'>('id');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -63,6 +65,11 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const albumsById = useMemo(() => new Map(albums.map((a) => [a.id, a])), [albums]);
+
+  const memberOptions = useMemo(
+    () => Array.from(new Set(cards.map((c) => c.member).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [cards],
+  );
 
   const filteredEras = useMemo(
     () => (typeFilter ? albumEras.filter((e) => String(e.collection_type_id) === typeFilter) : albumEras),
@@ -97,6 +104,9 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
       if (eraFilter && String(album?.era_id ?? '') !== eraFilter) return false;
       if (albumFilter && String(c.album_id) !== albumFilter) return false;
       if (categoryFilter && String(c.category_id) !== categoryFilter) return false;
+      if (memberFilter && c.member !== memberFilter) return false;
+      if (groupFilter === 'group' && !c.is_group) return false;
+      if (groupFilter === 'solo' && c.is_group) return false;
       if (!q) return true;
       return [c.member, c.card_name, c.code, c.image_path, c.retailer, c.notes].some((v) => (v || '').toLowerCase().includes(q));
     });
@@ -104,7 +114,7 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
       if (sortBy === 'sort_order') return (a.sort_order - b.sort_order) || (a.id - b.id);
       return a.id - b.id;
     });
-  }, [cards, search, typeFilter, eraFilter, albumFilter, categoryFilter, albumsById, sortBy]);
+  }, [cards, search, typeFilter, eraFilter, albumFilter, categoryFilter, memberFilter, groupFilter, albumsById, sortBy]);
 
   // ---------- Editar ----------
 
@@ -218,25 +228,34 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
     <div className="admin-card p-6 min-w-0">
       <div className="flex flex-col gap-3 mb-4">
         <h2 className="text-xl font-black text-white">Cards</h2>
-        <div className="grid md:grid-cols-3 xl:grid-cols-6 gap-3">
-          <input className="input md:col-span-3 xl:col-span-1" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar code, miembro, path..." />
-          <select className="input" value={typeFilter} onChange={(e) => onTypeFilterChange(e.target.value)}>
+        <div className="flex flex-wrap gap-3">
+          <input className="input flex-[2] min-w-[220px]" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar code, miembro, path..." />
+          <select className="input flex-1 min-w-[150px]" value={typeFilter} onChange={(e) => onTypeFilterChange(e.target.value)}>
             <option value="">Todos los tipos</option>
             {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-          <select className="input" value={eraFilter} onChange={(e) => onEraFilterChange(e.target.value)}>
+          <select className="input flex-1 min-w-[150px]" value={eraFilter} onChange={(e) => onEraFilterChange(e.target.value)}>
             <option value="">Todas las eras</option>
             {filteredEras.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
-          <select className="input" value={albumFilter} onChange={(e) => setAlbumFilter(e.target.value)}>
+          <select className="input flex-1 min-w-[150px]" value={albumFilter} onChange={(e) => setAlbumFilter(e.target.value)}>
             <option value="">Todos los álbumes</option>
             {filteredAlbums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <select className="input" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+          <select className="input flex-1 min-w-[150px]" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Todas las categorías</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <select className="input" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'id' | 'sort_order')}>
+          <select className="input flex-1 min-w-[150px]" value={memberFilter} onChange={(e) => setMemberFilter(e.target.value)}>
+            <option value="">Todos los miembros</option>
+            {memberOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <select className="input flex-1 min-w-[150px]" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value as '' | 'group' | 'solo')}>
+            <option value="">Grupal e individual</option>
+            <option value="group">Solo grupales</option>
+            <option value="solo">Solo individuales</option>
+          </select>
+          <select className="input flex-1 min-w-[150px]" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'id' | 'sort_order')}>
             <option value="id">Ordenar por ID</option>
             <option value="sort_order">Ordenar por orden de visualización</option>
           </select>
