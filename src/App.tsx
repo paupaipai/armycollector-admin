@@ -30,13 +30,31 @@ export default function App() {
   const [cardSets, setCardSets] = useState<CardSet[]>([]);
   const [adminError, setAdminError] = useState<string | null>(null);
 
+  async function fetchAllCards(): Promise<{ data: Card[]; error: Error | null }> {
+    const pageSize = 1000;
+    const all: Card[] = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('cards')
+        .select('*')
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) return { data: all, error };
+      all.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+      from += pageSize;
+    }
+    return { data: all, error: null };
+  }
+
   async function loadData() {
     console.log('[loadData] iniciando...');
     const [albumsRes, versionsRes, categoriesRes, cardsRes, collTypesRes, erasRes, setsRes] = await Promise.all([
       supabase.from('albums').select('*').order('id', { ascending: true }),
       supabase.from('album_versions').select('*').order('id', { ascending: true }),
       supabase.from('card_categories').select('*').order('id', { ascending: true }),
-      supabase.from('cards').select('*').order('id', { ascending: true }),
+      fetchAllCards(),
       supabase.from('collection_types').select('*').order('id', { ascending: true }),
       supabase.from('album_eras').select('*').order('id', { ascending: true }).order('sort_order', { ascending: true }),
       supabase.from('card_sets').select('*').order('id', { ascending: true }),

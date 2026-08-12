@@ -25,7 +25,9 @@
       "Bash(node -e ' *)",
       "Bash(npx --no-install playwright --version)",
       "Bash(find / -maxdepth 4 -iname \"*chromium-cli*\")",
-      "Bash(npm ls *)"
+      "Bash(npm ls *)",
+      "Bash(node -e \"require.resolve\\('playwright'\\)\")",
+      "Bash(find / -maxdepth 5 -iname \"playwright\" -type d)"
     ]
   }
 }
