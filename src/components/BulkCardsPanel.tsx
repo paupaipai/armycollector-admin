@@ -14,6 +14,10 @@ const RARITIES = ['Common', 'Rare', 'Ultra Rare', 'Limited'] as const;
 const MAX_IMAGE_WIDTH = 160;
 const MAX_IMAGE_HEIGHT = 240;
 
+/** Límites del bucket photocards en producción (migración photocards_bucket_limits). */
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 /** Redimensiona `file` para que quepa dentro de maxWidth×maxHeight (sin recortar ni estirar). */
 async function resizeImageFile(file: File, maxWidth: number, maxHeight: number): Promise<File> {
   const bitmap = await createImageBitmap(file);
@@ -422,9 +426,17 @@ export function BulkCardsPanel({
 
       const resized = await resizeImageFile(file, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
 
+      // El bucket photocards solo acepta PNG/JPEG/WebP de hasta 5 MiB (SR-3).
+      if (!ALLOWED_IMAGE_TYPES.includes(resized.type)) {
+        throw new Error(`${fileName}: formato ${resized.type || 'desconocido'} no permitido (solo PNG, JPEG o WebP).`);
+      }
+      if (resized.size > MAX_IMAGE_BYTES) {
+        throw new Error(`${fileName}: pesa ${(resized.size / 1024 / 1024).toFixed(1)} MiB, el máximo es 5 MiB.`);
+      }
+
       const { error } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)
-        .upload(row.image_path, resized, { cacheControl: '3600', upsert: true });
+        .upload(row.image_path, resized, { cacheControl: '3600', upsert: true, contentType: resized.type });
 
       if (error) throw new Error(`Error subiendo ${fileName}: ${error.message}`);
     }

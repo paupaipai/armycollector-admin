@@ -178,7 +178,7 @@ export default function App() {
         <div className="max-w-lg rounded-[2rem] bg-white/90 backdrop-blur border border-violet-100 p-8 text-center shadow-2xl shadow-black/20">
           <h1 className="text-2xl font-bold text-ink">Acceso no autorizado</h1>
           <p className="text-gray-600 mt-3">
-            Tu usuario existe, pero no tiene permiso admin. Ejecuta el SQL de configuración y marca tu perfil con <code>is_admin = true</code>.
+            Tu usuario existe, pero no tiene permiso admin. Un administrador debe marcar tu perfil con <code>is_admin = true</code> desde el dashboard de Supabase (solo se puede con service_role).
           </p>
           {adminError && <p className="mt-4 text-sm text-red-500">{adminError}</p>}
           <button onClick={signOut} className="mt-6 rounded-2xl bg-kpurple text-white px-5 py-3 font-bold">Salir</button>
