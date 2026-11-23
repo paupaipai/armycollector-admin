@@ -1,3 +1,15 @@
+-- ============================================================================
+-- ⚠️  OBSOLETO — NO VOLVER A EJECUTAR EN PRODUCCIÓN (2026-11-23)
+--
+-- Este script es del setup inicial. Desde Purple Collector v2 el esquema de
+-- producción lo definen las migraciones de supabase/migrations/ del repo de la
+-- app (32 aplicadas entre el 28-09 y el 21-11-2026). Re-ejecutarlo:
+--   * vuelve a crear policies duplicadas en user_profiles (deshace SR-7),
+--   * usa un enum card_status distinto al de producción,
+--   * no sabe nada de card_images, image_reports, card_submissions ni challenges.
+-- Se conserva solo como referencia histórica.
+-- ============================================================================
+
 -- K-Collector Admin — Schema completo
 -- Ejecuta esto en el SQL Editor de Supabase antes de usar el mantenedor.
 -- Es idempotente: se puede volver a ejecutar sin romper datos existentes.

@@ -1,15 +1,35 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Pencil, Save, Trash2, X } from 'lucide-react';
-import type { Album, AlbumEra, AlbumVersion, Card, CardCategory, CardSet, CollectionType } from '../types';
-import { STORAGE_BUCKET, supabase, supabaseAdmin } from '../lib/supabase';
+import { AlertTriangle, Ban, Pencil, Save, Trash2, X } from 'lucide-react';
+import type { Album, AlbumEra, AlbumVersion, Card, CardCategory, CardImage, CardSet, CollectionType } from '../types';
+import { STORAGE_BUCKET, supabase } from '../lib/supabase';
+import { CARD_IMAGE_COLUMNS, imageUrlFor, moderateCardImage, signedReviewUrls } from '../lib/cardImages';
 
 const RARITIES = ['Common', 'Rare', 'Ultra Rare', 'Limited'] as const;
 
-function getImageUrl(imagePath: string): string {
-  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(imagePath);
-  return data.publicUrl;
+const SOURCE_ORDER: Record<string, number> = { community: 0, admin: 1, legacy: 2 };
+
+type ResolvedImages = {
+  front: CardImage | null;
+  back: CardImage | null;
+  retired: boolean;
+};
+
+/** Misma regla que la vista cards_full: comunidad > admin > legacy, solo aprobadas y primarias. */
+function resolveImages(rows: CardImage[] | undefined): ResolvedImages {
+  const pick = (side: 'front' | 'back') =>
+    (rows || [])
+      .filter((r) => r.side === side && r.status === 'approved' && r.is_primary)
+      .sort((a, b) => SOURCE_ORDER[a.source_type] - SOURCE_ORDER[b.source_type])[0] ?? null;
+  return {
+    front: pick('front'),
+    back: pick('back'),
+    retired: (rows || []).some((r) => r.side === 'front' && r.taken_down_at),
+  };
 }
+
+const SOURCE_LABEL: Record<string, string> = { community: 'Comunidad', admin: 'Admin', legacy: 'Legacy' };
+const STATUS_LABEL: Record<string, string> = { pending: 'Pendiente', approved: 'Aprobada', rejected: 'Rechazada' };
 
 type Props = {
   albums: Album[];
@@ -17,6 +37,8 @@ type Props = {
   categories: CardCategory[];
   cardSets: CardSet[];
   cards: Card[];
+  /** Filas aprobadas de card_images (incluye legacy retiradas, que siguen 'approved'). */
+  cardImages: CardImage[];
   collectionTypes: CollectionType[];
   albumEras: AlbumEra[];
   onChanged: () => Promise<void>;
@@ -44,7 +66,7 @@ const emptyEditForm = {
   sort_order: '0',
 };
 
-export function CardsPanel({ albums, versions, categories, cardSets, cards, collectionTypes, albumEras, onChanged }: Props) {
+export function CardsPanel({ albums, versions, categories, cardSets, cards, cardImages, collectionTypes, albumEras, onChanged }: Props) {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [eraFilter, setEraFilter] = useState('');
@@ -53,6 +75,7 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
   const [memberFilter, setMemberFilter] = useState('');
   const [groupFilter, setGroupFilter] = useState<'' | 'group' | 'solo'>('');
   const [sortBy, setSortBy] = useState<'id' | 'sort_order'>('id');
+  const [imageFilter, setImageFilter] = useState<'' | 'none' | 'community' | 'legacy' | 'retired' | 'back'>('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const [editingCard, setEditingCard] = useState<Card | null>(null);
@@ -64,7 +87,24 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [editImages, setEditImages] = useState<CardImage[]>([]);
+  const [editImageUrls, setEditImageUrls] = useState<Map<string, string>>(new Map());
+  const [takedownTarget, setTakedownTarget] = useState<CardImage | null>(null);
+  const [takedownReason, setTakedownReason] = useState('');
+  const [takedownBusy, setTakedownBusy] = useState(false);
+
   const albumsById = useMemo(() => new Map(albums.map((a) => [a.id, a])), [albums]);
+
+  const resolvedByCard = useMemo(() => {
+    const grouped = new Map<number, CardImage[]>();
+    for (const img of cardImages) {
+      if (!grouped.has(img.card_id)) grouped.set(img.card_id, []);
+      grouped.get(img.card_id)!.push(img);
+    }
+    const out = new Map<number, ResolvedImages>();
+    for (const [cardId, rows] of grouped) out.set(cardId, resolveImages(rows));
+    return out;
+  }, [cardImages]);
 
   const memberOptions = useMemo(
     () => Array.from(new Set(cards.map((c) => c.member).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
@@ -107,14 +147,21 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
       if (memberFilter && c.member !== memberFilter) return false;
       if (groupFilter === 'group' && !c.is_group) return false;
       if (groupFilter === 'solo' && c.is_group) return false;
+      const res = resolvedByCard.get(c.id);
+      if (imageFilter === 'none' && res?.front) return false;
+      if (imageFilter === 'community' && res?.front?.source_type !== 'community') return false;
+      if (imageFilter === 'legacy' && res?.front?.source_type !== 'legacy') return false;
+      if (imageFilter === 'retired' && !res?.retired) return false;
+      if (imageFilter === 'back' && !res?.back) return false;
       if (!q) return true;
-      return [c.member, c.card_name, c.code, c.image_path, c.retailer, c.notes].some((v) => (v || '').toLowerCase().includes(q));
+      return [c.member, c.card_name, c.code, c.image_path, c.retailer, c.notes, res?.front?.contributor_handle, res?.back?.contributor_handle]
+        .some((v) => (v || '').toLowerCase().includes(q));
     });
     return [...list].sort((a, b) => {
       if (sortBy === 'sort_order') return (a.sort_order - b.sort_order) || (a.id - b.id);
       return a.id - b.id;
     });
-  }, [cards, search, typeFilter, eraFilter, albumFilter, categoryFilter, memberFilter, groupFilter, albumsById, sortBy]);
+  }, [cards, search, typeFilter, eraFilter, albumFilter, categoryFilter, memberFilter, groupFilter, imageFilter, resolvedByCard, albumsById, sortBy]);
 
   // ---------- Editar ----------
 
@@ -127,9 +174,44 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
     [cardSets, editForm.album_id],
   );
 
+  async function loadEditImages(cardId: number) {
+    const { data, error } = await supabase
+      .from('card_images')
+      .select(CARD_IMAGE_COLUMNS)
+      .eq('card_id', cardId)
+      .order('created_at', { ascending: false });
+    if (error) { setEditError(`No pude cargar las imágenes: ${error.message}`); return; }
+    const rows = (data || []) as unknown as CardImage[];
+    setEditImages(rows);
+    try {
+      setEditImageUrls(await signedReviewUrls(rows.filter((r) => r.bucket_id !== STORAGE_BUCKET && r.status !== 'approved').map((r) => r.storage_path)));
+    } catch {
+      setEditImageUrls(new Map());
+    }
+  }
+
+  async function confirmTakedown() {
+    if (!takedownTarget || !takedownReason.trim()) return;
+    setTakedownBusy(true);
+    setEditError(null);
+    try {
+      await moderateCardImage({ action: 'takedown', cardImageId: takedownTarget.id, reason: takedownReason.trim() });
+      setTakedownTarget(null);
+      setTakedownReason('');
+      if (editingCard) await loadEditImages(editingCard.id);
+      await onChanged();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'No se pudo retirar la imagen');
+    } finally {
+      setTakedownBusy(false);
+    }
+  }
+
   function openEdit(card: Card) {
     setEditingCard(card);
     setEditError(null);
+    setEditImages([]);
+    void loadEditImages(card.id);
     setEditForm({
       album_id: String(card.album_id),
       version_id: card.version_id != null ? String(card.version_id) : '',
@@ -155,6 +237,8 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
 
   function closeEdit() {
     setEditingCard(null);
+    setEditImages([]);
+    setTakedownTarget(null);
     setEditForm(emptyEditForm);
     setEditError(null);
   }
@@ -207,14 +291,42 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      if (deletingCard.image_path) {
-        const { error: storageError } = await supabaseAdmin.storage
-          .from(STORAGE_BUCKET)
-          .remove([deletingCard.image_path]);
-        if (storageError) throw storageError;
-      }
+      // Las filas de card_images (y sus reportes) se borran solas por ON DELETE
+      // CASCADE, pero los archivos no: se juntan todos los objetos de la card,
+      // de cualquier bucket, y se borran antes que la fila.
+      const { data: imgs, error: imgsError } = await supabase
+        .from('card_images')
+        .select('bucket_id, storage_path')
+        .eq('card_id', deletingCard.id);
+      if (imgsError) throw imgsError;
+
+      const byBucket = new Map<string, Set<string>>();
+      const add = (bucket: string, path: string) => {
+        if (!byBucket.has(bucket)) byBucket.set(bucket, new Set());
+        byBucket.get(bucket)!.add(path);
+      };
+      for (const img of imgs || []) add(img.bucket_id, img.storage_path);
+      if (deletingCard.image_path) add(STORAGE_BUCKET, deletingCard.image_path);
+
       const { error } = await supabase.from('cards').delete().eq('id', deletingCard.id);
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes('card_submissions_approved_has_card')) {
+          throw new Error(
+            'Esta card nació de una propuesta aprobada de la comunidad y la base no permite borrarla ' +
+            '(la propuesta quedaría aprobada sin card). Ocúltala desmarcando "Visible".',
+          );
+        }
+        throw error;
+      }
+
+      // Después de borrar la fila: si un archivo no se pudiera borrar, solo
+      // queda un huérfano, nunca una card apuntando a un archivo inexistente.
+      const leftovers: string[] = [];
+      for (const [bucket, paths] of byBucket) {
+        const { error: storageError } = await supabase.storage.from(bucket).remove(Array.from(paths));
+        if (storageError) leftovers.push(`${bucket}: ${storageError.message}`);
+      }
+      if (leftovers.length) console.warn('[CardsPanel] archivos sin borrar:', leftovers);
       await onChanged();
       setDeletingCard(null);
     } catch (err) {
@@ -259,6 +371,14 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
             <option value="id">Ordenar por ID</option>
             <option value="sort_order">Ordenar por orden de visualización</option>
           </select>
+          <select className="input flex-1 min-w-[150px]" value={imageFilter} onChange={(e) => setImageFilter(e.target.value as typeof imageFilter)}>
+            <option value="">Cualquier imagen</option>
+            <option value="none">Sin imagen en la app</option>
+            <option value="community">Imagen de la comunidad</option>
+            <option value="legacy">Imagen legacy</option>
+            <option value="retired">Imagen retirada</option>
+            <option value="back">Con reverso</option>
+          </select>
         </div>
         <p className="text-xs text-violet-100/65">Mostrando {filtered.length} de {cards.length} cards.</p>
       </div>
@@ -268,6 +388,7 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
             <tr>
               <th>ID</th>
               <th>Img</th>
+              <th>Origen</th>
               <th>Álbum</th>
               <th>Versión</th>
               <th>Categoría</th>
@@ -288,7 +409,8 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
               const version = versions.find((v) => v.id === c.version_id);
               const category = categories.find((cat) => cat.id === c.category_id);
               const cardSet = cardSets.find((s) => s.id === c.card_set_id);
-              const imgUrl = c.image_path ? getImageUrl(c.image_path) : null;
+              const res = resolvedByCard.get(c.id);
+              const imgUrl = res?.front ? imageUrlFor(res.front) : null;
               return (
                 <tr key={c.id}>
                   <td>{c.id}</td>
@@ -312,6 +434,18 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
                     ) : (
                       <span className="text-violet-100/40 text-xs">No image</span>
                     )}
+                  </td>
+                  <td className="text-xs whitespace-nowrap">
+                    {res?.front ? (
+                      <span className={res.front.source_type === 'community' ? 'text-fuchsia-300 font-bold' : 'text-violet-100/70'}>
+                        {SOURCE_LABEL[res.front.source_type]}
+                        {res.front.contributor_handle ? ` @${res.front.contributor_handle}` : ''}
+                      </span>
+                    ) : (
+                      <span className="text-violet-100/40">—</span>
+                    )}
+                    {res?.retired && <span className="ml-1 rounded-md bg-red-500/20 px-1.5 py-0.5 text-red-200">Retirada</span>}
+                    {res?.back && <span className="ml-1 rounded-md bg-white/10 px-1.5 py-0.5">+ reverso</span>}
                   </td>
                   <td>{album?.short_name || album?.name || c.album_id}</td>
                   <td>{version?.short_name || '-'}</td>
@@ -434,6 +568,43 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
 
             <EField label="Notas" value={editForm.notes} onChange={(v) => setField('notes', v)} />
 
+            <div>
+              <span className="label">Imágenes de esta card (card_images)</span>
+              {editImages.length === 0 ? (
+                <p className="text-xs text-violet-100/50">Sin imágenes registradas. En la app v2 se mostrará el placeholder.</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {editImages.map((img) => {
+                    const url = imageUrlFor(img, editImageUrls);
+                    return (
+                      <div key={img.id} className="rounded-2xl border border-violet-200/15 bg-white/5 p-2 text-xs space-y-1">
+                        {url && !img.taken_down_at ? (
+                          <img src={url} alt="" className="w-full h-32 object-contain rounded-lg bg-black/20" loading="lazy" />
+                        ) : (
+                          <div className="w-full h-32 rounded-lg bg-black/20 flex items-center justify-center text-violet-100/40">
+                            {img.taken_down_at ? 'Retirada' : 'Sin vista previa'}
+                          </div>
+                        )}
+                        <div className="font-bold">
+                          {SOURCE_LABEL[img.source_type]} · {img.side === 'back' ? 'Reverso' : 'Frente'}
+                        </div>
+                        <div className="text-violet-100/60">
+                          {STATUS_LABEL[img.status]}{img.is_primary ? ' · primaria' : ''}
+                          {img.contributor_handle ? ` · @${img.contributor_handle}` : ''}
+                        </div>
+                        {img.rejection_reason && <div className="text-violet-100/50 break-words">Motivo: {img.rejection_reason}</div>}
+                        {img.status === 'approved' && !img.taken_down_at && (
+                          <button type="button" className="icon-btn text-red-300 w-full" onClick={() => { setTakedownTarget(img); setTakedownReason(''); }}>
+                            <Ban size={13} /> Retirar
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center gap-5 text-sm font-bold text-violet-50">
               <label className="flex items-center gap-2">
                 <input type="checkbox" checked={editForm.is_group} onChange={(e) => setField('is_group', e.target.checked)} /> Grupo
@@ -459,6 +630,33 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
         document.body
       )}
 
+      {takedownTarget && createPortal(
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={() => !takedownBusy && setTakedownTarget(null)}>
+          <div className="admin-card p-6 max-w-md w-full space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 text-amber-400">
+              <Ban size={22} />
+              <h3 className="text-lg font-bold text-white">Retirar imagen</h3>
+            </div>
+            <p className="text-sm text-violet-100/80">
+              Se borra el archivo y la imagen deja de mostrarse.
+              {takedownTarget.source_type === 'legacy' && ' Al ser legacy, también se vacía cards.image_path (la Android 1.0.4 deja de verla).'}
+            </p>
+            <label className="block">
+              <span className="label">Motivo (obligatorio)</span>
+              <input className="input" value={takedownReason} onChange={(e) => setTakedownReason(e.target.value)} placeholder="Reclamo de copyright de…" autoFocus />
+            </label>
+            {editError && <p className="text-sm text-red-300">{editError}</p>}
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setTakedownTarget(null)} disabled={takedownBusy} className="flex-1 btn-secondary">Cancelar</button>
+              <button type="button" onClick={confirmTakedown} disabled={takedownBusy || !takedownReason.trim()} className="flex-1 btn-primary bg-red-600 hover:bg-red-500 disabled:opacity-60">
+                {takedownBusy ? 'Retirando...' : 'Retirar'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* Modal de confirmación de borrado */}
       {deletingCard && createPortal(
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => !deleteBusy && setDeletingCard(null)}>
@@ -468,8 +666,9 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, coll
               <h3 className="text-lg font-bold text-white">Eliminar card</h3>
             </div>
             <p className="text-sm text-violet-100/80">
-              Vas a eliminar <strong>{deletingCard.card_name}</strong> ({deletingCard.code}) de la base de datos
-              y su imagen (<code className="break-all">{deletingCard.image_path}</code>) de Storage. Esta acción no se puede deshacer.
+              Vas a eliminar <strong>{deletingCard.card_name}</strong> ({deletingCard.code}) de la base de datos,
+              junto con todas sus imágenes (legacy y de la comunidad), sus reportes y los archivos en Storage.
+              Si alguien de la comunidad aportó una imagen, se pierde su punto en el concurso. Esta acción no se puede deshacer.
             </p>
             {deleteError && <p className="text-sm text-red-300">{deleteError}</p>}
             <div className="flex gap-3">

@@ -3,6 +3,7 @@ import { AlertTriangle, ImagePlus, UploadCloud, X, Trash2 } from 'lucide-react';
 import { STORAGE_BUCKET, supabase, supabaseAdmin } from '../lib/supabase';
 import { BTS_GROUP, BTS_MEMBERS } from '../data/members';
 import { SaveToast } from './SaveToast';
+import { syncLegacyImages } from '../lib/cardImages';
 import type {
   Album, AlbumEra, AlbumVersion, CardCategory, CardInsert, CardSet, CollectionType, ImportedCropFile,
 } from '../types';
@@ -434,14 +435,40 @@ export function BulkCardsPanel({
     try {
       await uploadImages(rowsToSave);
 
-      const { error } = await supabase
+      const { data: saved, error } = await supabase
         .from('cards')
-        .upsert(rowsToSave, { onConflict: 'code' });
+        .upsert(rowsToSave, { onConflict: 'code' })
+        .select('id, code, image_path');
 
       if (error) throw error;
+
+      // La app v2 resuelve la imagen desde card_images (vista cards_full), no
+      // desde cards.image_path. Sin esta fila la card sale sin imagen.
+      const sync = await syncLegacyImages(saved || []);
+
+      // Una imagen retirada por reclamo no se re-publica por un re-upload: se
+      // vuelve a vaciar cards.image_path para que tampoco la vea la Android 1.0.4.
+      if (sync.skippedTakenDown.length) {
+        const { error: clearError } = await supabase
+          .from('cards')
+          .update({ image_path: null })
+          .in('code', sync.skippedTakenDown);
+        if (clearError) throw clearError;
+      }
+
       await onChanged?.();
       setToastStatus('success');
-      setMessage(`Listo: ${rowsToSave.length} cards guardadas.`);
+      const parts = [`Listo: ${rowsToSave.length} cards guardadas.`];
+      if (sync.inserted || sync.updated) {
+        parts.push(`Imágenes registradas en card_images: ${sync.inserted} nuevas, ${sync.updated} actualizadas.`);
+      }
+      if (sync.skippedTakenDown.length) {
+        parts.push(
+          `Atención: ${sync.skippedTakenDown.join(', ')} tenía(n) la imagen retirada por un reclamo; ` +
+          'se mantiene retirada en ambas apps (no se publicó la nueva imagen).',
+        );
+      }
+      setMessage(parts.join(' '));
     } catch (err) {
       setToastStatus(null);
       setMessage(err instanceof Error ? err.message : 'Error desconocido');

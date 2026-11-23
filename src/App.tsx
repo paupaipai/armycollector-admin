@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Database, Images, Layers3, Scissors, Tags, CreditCard, BookOpen, CalendarDays, Package } from 'lucide-react';
-import { supabase, supabaseAdmin } from './lib/supabase';
+import { LogOut, Database, Images, Layers3, Scissors, Tags, CreditCard, BookOpen, CalendarDays, Package, ShieldCheck, Trophy } from 'lucide-react';
+import { supabase } from './lib/supabase';
+import { fetchCardImages } from './lib/cardImages';
 import { Login } from './components/Login';
 import { AlbumsPanel } from './components/AlbumsPanel';
 import { VersionsPanel } from './components/VersionsPanel';
@@ -11,9 +12,11 @@ import { CardsPanel } from './components/CardsPanel';
 import { CollectionTypesPanel } from './components/CollectionTypesPanel';
 import { AlbumErasPanel } from './components/AlbumErasPanel';
 import { CardSetsPanel } from './components/CardSetsPanel';
-import type { Album, AlbumVersion, CardCategory, Card, ImportedCropFile, CollectionType, AlbumEra, CardSet } from './types';
+import { ModerationPanel } from './components/ModerationPanel';
+import { ChallengePanel } from './components/ChallengePanel';
+import type { Album, AlbumVersion, CardCategory, Card, CardImage, ImportedCropFile, CollectionType, AlbumEra, CardSet } from './types';
 
-type Tab = 'bulk' | 'cropper' | 'albums' | 'versions' | 'categories' | 'cards' | 'collection-types' | 'album-eras' | 'card-sets';
+type Tab = 'bulk' | 'cropper' | 'albums' | 'versions' | 'categories' | 'cards' | 'collection-types' | 'album-eras' | 'card-sets' | 'moderation' | 'challenge';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -25,6 +28,7 @@ export default function App() {
   const [versions, setVersions] = useState<AlbumVersion[]>([]);
   const [categories, setCategories] = useState<CardCategory[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
+  const [cardImages, setCardImages] = useState<CardImage[]>([]);
   const [collectionTypes, setCollectionTypes] = useState<CollectionType[]>([]);
   const [albumEras, setAlbumEras] = useState<AlbumEra[]>([]);
   const [cardSets, setCardSets] = useState<CardSet[]>([]);
@@ -50,7 +54,7 @@ export default function App() {
 
   async function loadData() {
     console.log('[loadData] iniciando...');
-    const [albumsRes, versionsRes, categoriesRes, cardsRes, collTypesRes, erasRes, setsRes] = await Promise.all([
+    const [albumsRes, versionsRes, categoriesRes, cardsRes, collTypesRes, erasRes, setsRes, imagesRes] = await Promise.all([
       supabase.from('albums').select('*').order('id', { ascending: true }),
       supabase.from('album_versions').select('*').order('id', { ascending: true }),
       supabase.from('card_categories').select('*').order('id', { ascending: true }),
@@ -58,6 +62,10 @@ export default function App() {
       supabase.from('collection_types').select('*').order('id', { ascending: true }),
       supabase.from('album_eras').select('*').order('id', { ascending: true }).order('sort_order', { ascending: true }),
       supabase.from('card_sets').select('*').order('id', { ascending: true }),
+      // Aprobadas: es lo que la app muestra (y las legacy retiradas, que siguen 'approved').
+      fetchCardImages((q) => q.eq('status', 'approved'))
+        .then((data) => ({ data, error: null }))
+        .catch((error: Error) => ({ data: [] as CardImage[], error })),
     ]);
 
     if (albumsRes.error) console.error('[loadData] albums:', albumsRes.error);
@@ -81,6 +89,9 @@ export default function App() {
 
     if (setsRes.error) console.error('[loadData] card_sets:', setsRes.error);
     else setCardSets(setsRes.data || []);
+
+    if (imagesRes.error) console.error('[loadData] card_images:', imagesRes.error);
+    else setCardImages(imagesRes.data);
   }
 
   async function checkSession(showSpinner = true) {
@@ -138,6 +149,7 @@ export default function App() {
         setVersions([]);
         setCategories([]);
         setCards([]);
+        setCardImages([]);
         setCollectionTypes([]);
         setAlbumEras([]);
         setCardSets([]);
@@ -193,6 +205,8 @@ export default function App() {
             <TabButton active={tab === 'cropper'} onClick={() => setTab('cropper')} icon={<Scissors size={14} />} label="Cropper" />
             <TabButton active={tab === 'bulk'} onClick={() => setTab('bulk')} icon={<Images size={14} />} label="Carga masiva" />
             <TabButton active={tab === 'cards'} onClick={() => setTab('cards')} icon={<CreditCard size={14} />} label="Cards" />
+            <TabButton active={tab === 'moderation'} onClick={() => setTab('moderation')} icon={<ShieldCheck size={14} />} label="Moderación" />
+            <TabButton active={tab === 'challenge'} onClick={() => setTab('challenge')} icon={<Trophy size={14} />} label="Challenge" />
           </nav>
           <button onClick={signOut} className="shrink-0 rounded-xl border border-violet-200/20 bg-white/10 px-3 py-1.5 text-xs font-bold text-violet-100 flex items-center gap-1.5 hover:bg-white/15">
             <LogOut size={14} /> Salir
@@ -207,8 +221,11 @@ export default function App() {
         <div className={tab !== 'versions' ? 'hidden' : ''}><VersionsPanel albums={albums} versions={versions} onChanged={loadData} /></div>
         <div className={tab !== 'categories' ? 'hidden' : ''}><CategoriesPanel categories={categories} onChanged={loadData} /></div>
         <div className={tab !== 'card-sets' ? 'hidden' : ''}><CardSetsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} onChanged={loadData} /></div>
-        <div className={tab !== 'cards' ? 'hidden' : ''}><CardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} cards={cards} collectionTypes={collectionTypes} albumEras={albumEras} onChanged={loadData} /></div>
+        <div className={tab !== 'cards' ? 'hidden' : ''}><CardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} cards={cards} cardImages={cardImages} collectionTypes={collectionTypes} albumEras={albumEras} onChanged={loadData} /></div>
         <div className={tab !== 'bulk' ? 'hidden' : ''}><BulkCardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} collectionTypes={collectionTypes} albumEras={albumEras} importedFiles={importedCropFiles} onChanged={loadData} /></div>
+        {/* Se montan solo al abrirse: cargan sus propios datos (bandejas, ranking). */}
+        {tab === 'moderation' && <ModerationPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} cards={cards} cardImages={cardImages} onChanged={loadData} />}
+        {tab === 'challenge' && <ChallengePanel cards={cards} albums={albums} />}
         <div className={tab !== 'cropper' ? 'hidden' : ''}><CropperPanel onSendToBulk={(files) => { setImportedCropFiles(files); setTab('bulk'); }} /></div>
       </section>
     </main>
