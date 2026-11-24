@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Ban, Check, Crop, Filter, Flag, ImageUp, Inbox, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
-  CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, moderateCardImage, moderateCardSubmission, signedReviewUrls,
+  CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, outputTypeForPath, overwriteReviewImage, moderateCardImage, moderateCardSubmission, signedReviewUrls,
 } from '../lib/cardImages';
 import type {
   Album, AlbumVersion, Card, CardCategory, CardImage, CardSet, CardSubmission, CollectionType, ImageReport, ReportStatus,
@@ -67,6 +67,8 @@ type Filters = {
   member: string;
   side: '' | 'front' | 'back';
 };
+
+type AdjustMeta = { width: number; height: number; byte_size: number };
 
 const EMPTY_FILTERS: Filters = { typeId: '', albumId: '', versionId: '', categoryId: '', member: '', side: '' };
 
@@ -533,6 +535,12 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
   const [urls, setUrls] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [adjusting, setAdjusting] = useState<{ s: CardSubmission; side: 'front' | 'back' } | null>(null);
+  /**
+   * Medidas reales de lo ajustado en esta sesión. La propuesta no se puede
+   * actualizar desde acá, así que al aprobar se corrigen en card_images.
+   */
+  const adjusted = useRef(new Map<number, { front?: AdjustMeta; back?: AdjustMeta }>());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -568,6 +576,7 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
     setBusyId(s.id);
     try {
       const res = await moderateCardSubmission({ action: 'approve', submissionId: s.id });
+      await fixAdjustedMeta(s.id, res.cardId, res.backPendingImageId);
       await load();
       if (res.action === 'resolve') {
         await afterAction('Propuesta marcada como resuelta. Al ser de un álbum no listado, no se creó ninguna card: créala a mano en Álbumes / Carga masiva.');
@@ -581,6 +590,35 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
       setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'No se pudo aprobar' });
     } finally {
       setBusyId(null);
+    }
+  }
+
+  /** Pone en card_images las medidas del archivo ajustado (best-effort). */
+  async function fixAdjustedMeta(submissionId: number, cardId?: number, backImageId?: number | null) {
+    const meta = adjusted.current.get(submissionId);
+    if (!meta || !cardId) return;
+    const toPatch = (m: AdjustMeta) => ({ width: m.width, height: m.height, byte_size: m.byte_size });
+    if (meta.front) {
+      await supabase.from('card_images').update(toPatch(meta.front))
+        .eq('card_id', cardId).eq('side', 'front').eq('source_type', 'community');
+    }
+    if (meta.back && backImageId) {
+      await supabase.from('card_images').update(toPatch(meta.back)).eq('id', backImageId);
+    }
+    adjusted.current.delete(submissionId);
+  }
+
+  async function saveAdjust(s: CardSubmission, side: 'front' | 'back', result: AdjustResult, andApprove: boolean) {
+    const path = side === 'front' ? s.storage_path : s.back_storage_path;
+    if (!path) throw new Error('La propuesta no tiene esa imagen.');
+    await overwriteReviewImage(path, result.blob);
+    const prev = adjusted.current.get(s.id) || {};
+    adjusted.current.set(s.id, { ...prev, [side]: { width: result.width, height: result.height, byte_size: result.blob.size } });
+    setUrls((m) => new Map(m).set(path, URL.createObjectURL(result.blob)));
+    if (andApprove) {
+      await approve(s);
+    } else {
+      setNotice({ kind: 'ok', text: `Encuadre ajustado (${side === 'front' ? 'frente' : 'reverso'}, ${result.width}×${result.height}).` });
     }
   }
 
@@ -642,6 +680,16 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
                 <Thumb label="Frente" url={urls.get(s.storage_path) ?? null} emptyText={s.status === 'approved' ? 'Publicada' : 'Sin vista previa'} />
                 <Thumb label="Reverso" url={s.back_storage_path ? urls.get(s.back_storage_path) ?? null : null} emptyText={s.back_storage_path ? 'Sin vista previa' : 'No enviado'} />
               </div>
+              {s.status === 'pending' && s.bucket_id === REVIEW_BUCKET && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button className="btn-secondary !py-1.5 text-xs" disabled={busyId === s.id || !urls.get(s.storage_path)} onClick={() => setAdjusting({ s, side: 'front' })}>
+                    <Crop size={13} /> Ajustar frente
+                  </button>
+                  <button className="btn-secondary !py-1.5 text-xs" disabled={busyId === s.id || !s.back_storage_path} onClick={() => setAdjusting({ s, side: 'back' })}>
+                    <Crop size={13} /> Ajustar reverso
+                  </button>
+                </div>
+              )}
               {s.rejection_reason && <p className="text-xs text-violet-100/60">Motivo: {s.rejection_reason}</p>}
               {s.created_card_id && <p className="text-xs text-violet-100/60">Card creada: #{s.created_card_id}</p>}
               {s.status === 'pending' && (
@@ -660,6 +708,25 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
         })}
       </div>
       {loading && <p className="text-violet-100/60 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Cargando…</p>}
+
+      {adjusting && (() => {
+        const { s, side } = adjusting;
+        const path = (side === 'front' ? s.storage_path : s.back_storage_path) || '';
+        return (
+          <ImageAdjustModal
+            key={`${s.id}:${side}`}
+            title={`${s.card_name || 'Propuesta'} · ${s.member}`}
+            subtitle={`${side === 'back' ? 'Reverso' : 'Frente'} · @${s.contributor_handle || 'sin usuario'} · propuesta de card nueva`}
+            storagePath={path}
+            currentUrl={urls.get(path) ?? null}
+            currentLabel="Como está ahora"
+            approveLabel={s.album_unlisted ? 'Guardar y marcar resuelta' : 'Guardar y crear card'}
+            outputType={outputTypeForPath(path)}
+            onClose={() => setAdjusting(null)}
+            onSave={(result, andApprove) => saveAdjust(s, side, result, andApprove)}
+          />
+        );
+      })()}
     </div>
   );
 }

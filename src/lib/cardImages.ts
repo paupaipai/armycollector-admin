@@ -247,3 +247,26 @@ export async function adjustPendingImage(
 
   return patch;
 }
+
+/** Tipo de salida que respeta la extensión del archivo (al sobrescribir en el mismo path). */
+export function outputTypeForPath(path: string): 'image/jpeg' | 'image/png' | 'image/webp' {
+  const ext = path.split('.').pop()?.toLowerCase();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  return 'image/jpeg';
+}
+
+/**
+ * Ajuste de una imagen de propuesta (card_submissions). El admin no tiene
+ * UPDATE sobre card_submissions (solo la edge function la modifica), así que no
+ * se puede apuntar la fila a un archivo nuevo: se sobrescribe el objeto en el
+ * mismo path del bucket de revisión (policy "community review update admin").
+ * width/height/byte_size de la propuesta quedan con los valores originales.
+ */
+export async function overwriteReviewImage(path: string, blob: Blob): Promise<void> {
+  if (blob.size > ADJUST_MAX_BYTES) throw new Error('La imagen ajustada pesa más de 5 MB.');
+  const { error } = await supabase.storage
+    .from(REVIEW_BUCKET)
+    .update(path, blob, { contentType: blob.type || outputTypeForPath(path), cacheControl: '31536000' });
+  if (error) throw new Error(`No se pudo guardar el ajuste: ${error.message}`);
+}

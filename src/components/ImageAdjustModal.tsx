@@ -25,11 +25,17 @@ type Props = {
   storagePath: string;
   currentUrl: string | null;
   currentLabel: string;
+  /** Texto del botón que guarda y aprueba. */
+  approveLabel?: string;
+  /** Formato de salida (por defecto JPEG al 75 %, como la app). */
+  outputType?: 'image/jpeg' | 'image/png' | 'image/webp';
   onClose: () => void;
   onSave: (result: AdjustResult, approve: boolean) => Promise<void>;
 };
 
-export function ImageAdjustModal({ title, subtitle, storagePath, currentUrl, currentLabel, onClose, onSave }: Props) {
+export function ImageAdjustModal({
+  title, subtitle, storagePath, currentUrl, currentLabel, approveLabel = 'Guardar y aprobar', outputType = 'image/jpeg', onClose, onSave,
+}: Props) {
   const [src, setSrc] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState(START_ZOOM);
@@ -122,7 +128,7 @@ export function ImageAdjustModal({ title, subtitle, storagePath, currentUrl, cur
     if (!ctx) throw new Error('El navegador no permite generar la imagen.');
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, originX, originY, cropW, cropH, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', ADJUST_JPEG_QUALITY));
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, outputType, ADJUST_JPEG_QUALITY));
     if (!blob) throw new Error('No se pudo generar la imagen.');
     return { blob, width, height };
   }
@@ -204,7 +210,7 @@ export function ImageAdjustModal({ title, subtitle, storagePath, currentUrl, cur
               <button type="button" className="icon-btn !p-1.5" onClick={reset} disabled={!natural} title="Restablecer"><RotateCcw size={14} /></button>
             </div>
             <div className="text-[11px] text-violet-100/60">
-              {zoom.toFixed(2)}× · se guarda en JPEG de máx. {ADJUST_MAX_WIDTH}×{ADJUST_MAX_WIDTH * 1.5}
+              {zoom.toFixed(2)}× · se guarda en {outputType === 'image/jpeg' ? 'JPEG' : outputType === 'image/png' ? 'PNG' : 'WebP'} de máx. {ADJUST_MAX_WIDTH}×{ADJUST_MAX_WIDTH * 1.5}
             </div>
           </div>
         </div>
@@ -217,7 +223,7 @@ export function ImageAdjustModal({ title, subtitle, storagePath, currentUrl, cur
             {busy === 'save' ? <Loader2 size={15} className="animate-spin" /> : null} Guardar ajuste
           </button>
           <button type="button" className="flex-1 btn-primary disabled:opacity-60" onClick={() => save(true)} disabled={Boolean(busy) || !natural}>
-            {busy === 'approve' ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Guardar y aprobar
+            {busy === 'approve' ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {approveLabel}
           </button>
         </div>
       </div>
