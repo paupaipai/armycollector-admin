@@ -194,3 +194,56 @@ export function moderateCardSubmission(payload: ModerateSubmissionAction) {
     payload,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Ajuste de encuadre de un aporte pendiente (mismas reglas que la app:
+// lib/moderationAdjust.ts → máx. 800 px de ancho, JPEG al 75 %).
+// ---------------------------------------------------------------------------
+
+export const ADJUST_MAX_WIDTH = 800;
+export const ADJUST_JPEG_QUALITY = 0.75;
+const ADJUST_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Sube la versión ajustada a <adminId>/adjusted/<uuid>.jpg, apunta la fila a
+ * ella (solo si sigue en pending) y borra el archivo anterior. contributed_by
+ * no cambia: el aporte sigue siendo de quien lo subió.
+ */
+export async function adjustPendingImage(
+  img: Pick<CardImage, 'id' | 'storage_path'>,
+  blob: Blob,
+  width: number,
+  height: number,
+): Promise<{ storage_path: string; width: number; height: number; byte_size: number }> {
+  if (blob.size > ADJUST_MAX_BYTES) throw new Error('La imagen ajustada pesa más de 5 MB.');
+
+  const { data: auth } = await supabase.auth.getUser();
+  const adminId = auth.user?.id;
+  if (!adminId) throw new Error('Sesión expirada, vuelve a entrar.');
+
+  const newPath = `${adminId}/adjusted/${crypto.randomUUID()}.jpg`;
+  const { error: uploadError } = await supabase.storage
+    .from(REVIEW_BUCKET)
+    .upload(newPath, blob, { contentType: 'image/jpeg', cacheControl: '31536000', upsert: false });
+  if (uploadError) throw new Error(`No se pudo subir el ajuste: ${uploadError.message}`);
+
+  const patch = { storage_path: newPath, width, height, byte_size: blob.size };
+  const { data: updated, error: updateError } = await supabase
+    .from('card_images')
+    .update(patch)
+    .eq('id', img.id)
+    .eq('status', 'pending')
+    .select('id');
+
+  if (updateError || !updated?.length) {
+    await supabase.storage.from(REVIEW_BUCKET).remove([newPath]);
+    throw new Error(updateError ? `No se pudo guardar el ajuste: ${updateError.message}` : 'El aporte ya no está pendiente.');
+  }
+
+  // Best-effort: la fila ya apunta al archivo nuevo.
+  if (img.storage_path !== newPath) {
+    await supabase.storage.from(REVIEW_BUCKET).remove([img.storage_path]);
+  }
+
+  return patch;
+}

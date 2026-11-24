@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Ban, Check, Flag, ImageUp, Inbox, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { Ban, Check, Crop, Flag, ImageUp, Inbox, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
-  CARD_IMAGE_COLUMNS, REVIEW_BUCKET, imageUrlFor, moderateCardImage, moderateCardSubmission, signedReviewUrls,
+  CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, moderateCardImage, moderateCardSubmission, signedReviewUrls,
 } from '../lib/cardImages';
 import type {
   Album, AlbumVersion, Card, CardCategory, CardImage, CardSet, CardSubmission, ImageReport, ReportStatus,
 } from '../types';
+import { ImageAdjustModal, type AdjustResult } from './ImageAdjustModal';
 
 type Props = {
   albums: Album[];
@@ -164,6 +165,7 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
   const [hasMore, setHasMore] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [handleFilter, setHandleFilter] = useState('');
+  const [adjusting, setAdjusting] = useState<CardImage | null>(null);
 
   const load = useCallback(async (offset = 0) => {
     setLoading(true);
@@ -201,6 +203,19 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
       setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'No se pudo aprobar' });
     } finally {
       setBusyId(null);
+    }
+  }
+
+  /** Guarda el re-encuadre (y opcionalmente aprueba). Lanza para que el modal muestre el error. */
+  async function saveAdjust(img: CardImage, result: AdjustResult, andApprove: boolean) {
+    const patch = await adjustPendingImage(img, result.blob, result.width, result.height);
+    const updated = { ...img, ...patch };
+    setUrls((prev) => new Map(prev).set(patch.storage_path, URL.createObjectURL(result.blob)));
+    setRows((r) => r.map((x) => (x.id === img.id ? updated : x)));
+    if (andApprove) {
+      await approve(updated);
+    } else {
+      setNotice({ kind: 'ok', text: `Encuadre ajustado: ${cardLabel(img.card_id)} (${result.width}×${result.height}).` });
     }
   }
 
@@ -246,10 +261,13 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <Thumb label="Aporte" url={pendingUrl} />
                 <Thumb label={current ? `Actual (${current.source_type})` : 'Actual: sin imagen'} url={currentUrl} />
+                <Thumb label="Nueva (aporte)" url={pendingUrl} />
               </div>
               <div className="flex gap-2">
+                <button className="btn-secondary !py-2" disabled={busyId === img.id} onClick={() => setAdjusting(img)} title="Ajustar encuadre">
+                  <Crop size={15} /> Ajustar
+                </button>
                 <button className="flex-1 btn-primary !py-2 disabled:opacity-60" disabled={busyId === img.id} onClick={() => approve(img)}>
                   {busyId === img.id ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Aprobar
                 </button>
@@ -264,6 +282,21 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
 
       {loading && <p className="text-violet-100/60 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Cargando…</p>}
       {hasMore && !loading && <button className="btn-secondary" onClick={() => load(rows.length)}>Cargar más</button>}
+
+      {adjusting && (() => {
+        const current = currentByCardSide.get(`${adjusting.card_id}:${adjusting.side}`);
+        return (
+          <ImageAdjustModal
+            title={cardLabel(adjusting.card_id)}
+            subtitle={`${adjusting.side === 'back' ? 'Reverso' : 'Frente'} · @${adjusting.contributor_handle || 'sin usuario'}`}
+            storagePath={adjusting.storage_path}
+            currentUrl={current ? imageUrlFor(current) : null}
+            currentLabel={current ? `Actual (${current.source_type})` : 'Actual: sin imagen'}
+            onClose={() => setAdjusting(null)}
+            onSave={(result, andApprove) => saveAdjust(adjusting, result, andApprove)}
+          />
+        );
+      })()}
     </div>
   );
 }
