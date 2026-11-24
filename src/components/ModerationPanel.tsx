@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { Ban, Check, Crop, Filter, Flag, ImageUp, Inbox, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
-  CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, outputTypeForPath, overwriteReviewImage, moderateCardImage, moderateCardSubmission, signedReviewUrls,
+  ADJUST_MAX_WIDTH, CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, outputTypeForPath, overwriteReviewImage,
+  shrinkReviewImage, moderateCardImage, moderateCardSubmission, signedReviewUrls,
 } from '../lib/cardImages';
 import type {
   Album, AlbumVersion, Card, CardCategory, CardImage, CardSet, CardSubmission, CollectionType, ImageReport, ReportStatus,
@@ -272,6 +273,11 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
   async function approve(img: CardImage) {
     setBusyId(img.id);
     try {
+      // Se publica en máx. 400 px: si el aporte es más grande se reduce antes.
+      if (!img.width || img.width > ADJUST_MAX_WIDTH) {
+        const small = await shrinkReviewImage(img.storage_path);
+        if (small) img = { ...img, ...(await adjustPendingImage(img, small.blob, small.width, small.height)) };
+      }
       await moderateCardImage({ action: 'approve', cardImageId: img.id });
       setRows((r) => r.filter((x) => x.id !== img.id));
       await afterAction(`Aprobada: ${cardLabel(img.card_id)} (${img.side === 'back' ? 'reverso' : 'frente'}).`);
@@ -315,7 +321,7 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
       <div className="flex flex-wrap gap-3 items-center">
         <input className="input max-w-xs !mt-0" placeholder="Filtrar por @usuario" value={handleFilter} onChange={(e) => setHandleFilter(e.target.value)} />
         <button className="btn-secondary" onClick={() => load(0)} disabled={loading}><RefreshCw size={14} /> Recargar</button>
-        <p className="text-xs text-violet-100/60">Se muestran las más antiguas primero. Aprobar mueve el archivo al bucket público y la deja como imagen principal de la card.</p>
+        <p className="text-xs text-violet-100/60">Se muestran las más antiguas primero. Aprobar reduce la imagen a máx. 400×600 (JPEG 85 %), la mueve al bucket público y la deja como imagen principal de la card.</p>
       </div>
 
       {rows.length === 0 && !loading && <p className="text-violet-100/70">No hay aportes pendientes. 🎉</p>}
@@ -575,6 +581,16 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
   async function approve(s: CardSubmission) {
     setBusyId(s.id);
     try {
+      // Frente y reverso se publican en máx. 400 px: se reducen antes de aprobar.
+      for (const side of ['front', 'back'] as const) {
+        const path = side === 'front' ? s.storage_path : s.back_storage_path;
+        if (!path || s.bucket_id !== REVIEW_BUCKET) continue;
+        const small = await shrinkReviewImage(path, outputTypeForPath(path));
+        if (!small) continue;
+        await overwriteReviewImage(path, small.blob);
+        const prev = adjusted.current.get(s.id) || {};
+        adjusted.current.set(s.id, { ...prev, [side]: { width: small.width, height: small.height, byte_size: small.blob.size } });
+      }
       const res = await moderateCardSubmission({ action: 'approve', submissionId: s.id });
       await fixAdjustedMeta(s.id, res.cardId, res.backPendingImageId);
       await load();

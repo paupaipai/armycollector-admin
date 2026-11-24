@@ -196,12 +196,13 @@ export function moderateCardSubmission(payload: ModerateSubmissionAction) {
 }
 
 // ---------------------------------------------------------------------------
-// Ajuste de encuadre de un aporte pendiente (mismas reglas que la app:
-// lib/moderationAdjust.ts → máx. 800 px de ancho, JPEG al 75 %).
+// Ajuste de encuadre y tamaño de publicación.
+// Todo lo que se aprueba desde el mantenedor queda en máx. 400 px de ancho
+// (400×600 en 2:3), JPEG al 85 %: nítida en pantallas retina y ~40–80 kB.
 // ---------------------------------------------------------------------------
 
-export const ADJUST_MAX_WIDTH = 800;
-export const ADJUST_JPEG_QUALITY = 0.75;
+export const ADJUST_MAX_WIDTH = 400;
+export const ADJUST_JPEG_QUALITY = 0.85;
 const ADJUST_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
@@ -269,4 +270,60 @@ export async function overwriteReviewImage(path: string, blob: Blob): Promise<vo
     .from(REVIEW_BUCKET)
     .update(path, blob, { contentType: blob.type || outputTypeForPath(path), cacheControl: '31536000' });
   if (error) throw new Error(`No se pudo guardar el ajuste: ${error.message}`);
+}
+
+/**
+ * Reduce `blob` a máx. `maxWidth` de ancho, bajando a la mitad por pasos para
+ * que la reducción grande no quede pixelada. Devuelve null si ya cabe.
+ */
+export async function downscaleBlob(
+  blob: Blob,
+  type: 'image/jpeg' | 'image/png' | 'image/webp' = 'image/jpeg',
+  maxWidth = ADJUST_MAX_WIDTH,
+): Promise<{ blob: Blob; width: number; height: number } | null> {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    if (bitmap.width <= maxWidth) return null;
+    const targetW = maxWidth;
+    const targetH = Math.max(1, Math.round(bitmap.height * (maxWidth / bitmap.width)));
+
+    let source: CanvasImageSource = bitmap;
+    let w = bitmap.width;
+    let h = bitmap.height;
+    while (w / 2 >= targetW) {
+      const half = document.createElement('canvas');
+      half.width = Math.round(w / 2);
+      half.height = Math.round(h / 2);
+      const hctx = half.getContext('2d');
+      if (!hctx) break;
+      hctx.imageSmoothingQuality = 'high';
+      hctx.drawImage(source, 0, 0, half.width, half.height);
+      source = half;
+      w = half.width;
+      h = half.height;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('El navegador no permite generar la imagen.');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(source, 0, 0, targetW, targetH);
+    const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, ADJUST_JPEG_QUALITY));
+    if (!out) throw new Error('No se pudo generar la imagen reducida.');
+    return { blob: out, width: targetW, height: targetH };
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** Descarga un archivo del bucket de revisión y lo reduce si pasa de 400 px. */
+export async function shrinkReviewImage(
+  path: string,
+  type: 'image/jpeg' | 'image/png' | 'image/webp' = 'image/jpeg',
+): Promise<{ blob: Blob; width: number; height: number } | null> {
+  const { data, error } = await supabase.storage.from(REVIEW_BUCKET).download(path);
+  if (error || !data) throw new Error(`No pude descargar la imagen para reducirla: ${error?.message ?? 'vacía'}`);
+  return downscaleBlob(data, type);
 }
