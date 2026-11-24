@@ -1,6 +1,6 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Ban, Pencil, Save, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Ban, ChevronLeft, ChevronRight, Pencil, Save, Trash2, X } from 'lucide-react';
 import type { Album, AlbumEra, AlbumVersion, Card, CardCategory, CardImage, CardSet, CollectionType } from '../types';
 import { STORAGE_BUCKET, supabase } from '../lib/supabase';
 import { CARD_IMAGE_COLUMNS, imageUrlFor, moderateCardImage, signedReviewUrls } from '../lib/cardImages';
@@ -162,6 +162,15 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, card
       return a.id - b.id;
     });
   }, [cards, search, typeFilter, eraFilter, albumFilter, categoryFilter, memberFilter, groupFilter, imageFilter, resolvedByCard, albumsById, sortBy]);
+
+  // ---------- Paginación ----------
+  // Se dibujan solo PAGE_SIZE filas: con las ~4500 de una vez, hacer scroll
+  // rápido pedía cientos de imágenes seguidas a Storage y saturaba Supabase.
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  useEffect(() => { setPage(0); }, [search, typeFilter, eraFilter, albumFilter, categoryFilter, memberFilter, groupFilter, imageFilter, sortBy]);
+  useEffect(() => { if (page > pageCount - 1) setPage(pageCount - 1); }, [page, pageCount]);
+  const pageRows = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
 
   // ---------- Editar ----------
 
@@ -380,7 +389,14 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, card
             <option value="back">Con reverso</option>
           </select>
         </div>
-        <p className="text-xs text-violet-100/65">Mostrando {filtered.length} de {cards.length} cards.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-violet-100/65">
+            {filtered.length === 0
+              ? `0 de ${cards.length} cards.`
+              : `Mostrando ${page * PAGE_SIZE + 1}–${Math.min(filtered.length, (page + 1) * PAGE_SIZE)} de ${filtered.length} cards filtradas (${cards.length} en total).`}
+          </p>
+          <Pager page={page} pageCount={pageCount} setPage={setPage} />
+        </div>
       </div>
       <div className="rounded-3xl border border-violet-200/10 overflow-x-auto">
         <table className="admin-table">
@@ -404,7 +420,7 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, card
             </tr>
           </thead>
           <tbody>
-            {filtered.map((c) => {
+            {pageRows.map((c) => {
               const album = albums.find((a) => a.id === c.album_id);
               const version = versions.find((v) => v.id === c.version_id);
               const category = categories.find((cat) => cat.id === c.category_id);
@@ -473,6 +489,11 @@ export function CardsPanel({ albums, versions, categories, cardSets, cards, card
         </table>
       </div>
       {filtered.length === 0 && <p className="text-violet-100/70 mt-4">No hay resultados.</p>}
+      {pageCount > 1 && (
+        <div className="flex justify-end mt-3">
+          <Pager page={page} pageCount={pageCount} setPage={(p) => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+        </div>
+      )}
 
       {previewUrl && createPortal(
         <div
@@ -695,5 +716,26 @@ function EField({ label, value, onChange, placeholder, type = 'text', required =
       <input className="input" value={value} onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder} type={type} required={required} />
     </label>
+  );
+}
+
+const PAGE_SIZE = 100;
+
+function Pager({ page, pageCount, setPage }: { page: number; pageCount: number; setPage: (p: number) => void }) {
+  if (pageCount <= 1) return null;
+  return (
+    <div className="flex items-center gap-2 text-xs text-violet-100/80">
+      <button type="button" className="icon-btn !p-1.5 disabled:opacity-40" onClick={() => setPage(page - 1)} disabled={page === 0} title="Página anterior">
+        <ChevronLeft size={14} />
+      </button>
+      <select className="input !mt-0 !py-1 !px-2 !w-auto text-xs" value={page} onChange={(e) => setPage(Number(e.target.value))}>
+        {Array.from({ length: pageCount }, (_, i) => (
+          <option key={i} value={i}>Página {i + 1} de {pageCount}</option>
+        ))}
+      </select>
+      <button type="button" className="icon-btn !p-1.5 disabled:opacity-40" onClick={() => setPage(page + 1)} disabled={page >= pageCount - 1} title="Página siguiente">
+        <ChevronRight size={14} />
+      </button>
+    </div>
   );
 }
