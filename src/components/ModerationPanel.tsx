@@ -4,7 +4,7 @@ import { Ban, Check, Crop, Filter, Flag, ImageUp, Inbox, Loader2, RefreshCw, Shi
 import { supabase } from '../lib/supabase';
 import {
   ADJUST_MAX_WIDTH, CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, outputTypeForPath, overwriteReviewImage,
-  shrinkReviewImage, moderateCardImage, moderateCardSubmission, signedReviewUrls,
+  shrinkApprovedImage, shrinkReviewImage, COMMUNITY_BUCKET, moderateCardImage, moderateCardSubmission, signedReviewUrls,
 } from '../lib/cardImages';
 import type {
   Album, AlbumVersion, Card, CardCategory, CardImage, CardSet, CardSubmission, CollectionType, ImageReport, ReportStatus,
@@ -324,6 +324,8 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
         <p className="text-xs text-violet-100/60">Se muestran las más antiguas primero. Aprobar reduce la imagen a máx. 400×600 (JPEG 85 %), la mueve al bucket público y la deja como imagen principal de la card.</p>
       </div>
 
+      <ShrinkApproved setNotice={setNotice} />
+
       {rows.length === 0 && !loading && <p className="text-violet-100/70">No hay aportes pendientes. 🎉</p>}
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
@@ -379,6 +381,87 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
           />
         );
       })()}
+    </div>
+  );
+}
+
+/**
+ * Herramienta de mantenimiento: reduce a 400 px las imágenes de la comunidad
+ * que se aprobaron antes de que existiera ese límite. Solo aparece si quedan.
+ */
+function ShrinkApproved({ setNotice }: { setNotice: Shared['setNotice'] }) {
+  const [rows, setRows] = useState<CardImage[] | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('card_images')
+      .select(CARD_IMAGE_COLUMNS)
+      .eq('source_type', 'community')
+      .eq('status', 'approved')
+      .eq('bucket_id', COMMUNITY_BUCKET)
+      .or(`width.gt.${ADJUST_MAX_WIDTH},width.is.null`)
+      .order('id');
+    if (error) { setNotice({ kind: 'error', text: `No pude revisar las aprobadas: ${error.message}` }); return; }
+    setRows((data || []) as unknown as CardImage[]);
+  }, [setNotice]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function run() {
+    if (!rows?.length) return;
+    const { data: auth } = await supabase.auth.getUser();
+    const adminId = auth.user?.id;
+    if (!adminId) { setNotice({ kind: 'error', text: 'Sesión expirada, vuelve a entrar.' }); return; }
+
+    const errs: string[] = [];
+    let before = 0;
+    let after = 0;
+    let changed = 0;
+    setErrors([]);
+    setProgress({ done: 0, total: rows.length });
+    for (let i = 0; i < rows.length; i++) {
+      const img = rows[i];
+      try {
+        const res = await shrinkApprovedImage(img, adminId);
+        if (res) { changed++; before += res.before; after += res.byte_size; }
+      } catch (err) {
+        errs.push(`#${img.id} (card ${img.card_id}): ${err instanceof Error ? err.message : 'error'}`);
+      }
+      setProgress({ done: i + 1, total: rows.length });
+    }
+    setErrors(errs);
+    setProgress(null);
+    const kb = (n: number) => `${Math.round(n / 1024)} kB`;
+    setNotice({
+      kind: errs.length ? 'error' : 'ok',
+      text: `Reducidas ${changed} de ${rows.length} a máx. ${ADJUST_MAX_WIDTH}×${ADJUST_MAX_WIDTH * 1.5}` +
+        (changed ? ` (${kb(before)} → ${kb(after)})` : '') +
+        (errs.length ? `. ${errs.length} con error, ver detalle abajo.` : '.'),
+    });
+    await load();
+  }
+
+  if (!rows || (rows.length === 0 && !errors.length)) return null;
+
+  return (
+    <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-3 space-y-2 text-sm text-amber-50">
+      <div className="flex flex-wrap items-center gap-3">
+        <span>
+          Hay <b>{rows.length}</b> imagen{rows.length === 1 ? '' : 'es'} ya aprobada{rows.length === 1 ? '' : 's'} de más de {ADJUST_MAX_WIDTH} px.
+          Se reemplazan en el mismo lugar por una versión de {ADJUST_MAX_WIDTH}×{ADJUST_MAX_WIDTH * 1.5} (JPEG 85 %) y el original
+          se respalda en el bucket privado.
+        </span>
+        <button className="btn-primary !py-1.5 disabled:opacity-60 ml-auto" onClick={run} disabled={Boolean(progress) || rows.length === 0}>
+          {progress ? <><Loader2 size={14} className="animate-spin" /> {progress.done}/{progress.total}</> : 'Reducir ahora'}
+        </button>
+      </div>
+      {errors.length > 0 && (
+        <ul className="text-xs text-red-200 list-disc pl-5">
+          {errors.map((e) => <li key={e}>{e}</li>)}
+        </ul>
+      )}
     </div>
   );
 }

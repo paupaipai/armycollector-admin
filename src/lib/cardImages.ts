@@ -327,3 +327,38 @@ export async function shrinkReviewImage(
   if (error || !data) throw new Error(`No pude descargar la imagen para reducirla: ${error?.message ?? 'vacía'}`);
   return downscaleBlob(data, type);
 }
+
+/**
+ * Reduce una imagen YA APROBADA a máx. 400 px. El admin no puede subir
+ * archivos nuevos al bucket público (no hay policy de INSERT), así que se
+ * reemplaza en el mismo path. Antes se respalda el original en el bucket
+ * privado, en <adminId>/backup-aprobadas/<id>-<archivo>.
+ * Devuelve null si ya medía 400 px o menos.
+ */
+export async function shrinkApprovedImage(
+  img: Pick<CardImage, 'id' | 'bucket_id' | 'storage_path'>,
+  adminId: string,
+): Promise<{ width: number; height: number; byte_size: number; before: number } | null> {
+  const { data, error } = await supabase.storage.from(img.bucket_id).download(img.storage_path);
+  if (error || !data) throw new Error(`no se pudo descargar: ${error?.message ?? 'vacía'}`);
+
+  const small = await downscaleBlob(data, 'image/jpeg');
+  if (!small) return null;
+
+  const name = img.storage_path.split('/').pop() || `${img.id}`;
+  const { error: backupError } = await supabase.storage
+    .from(REVIEW_BUCKET)
+    .upload(`${adminId}/backup-aprobadas/${img.id}-${name}`, data, { contentType: data.type || 'image/jpeg', upsert: true });
+  if (backupError) throw new Error(`no se pudo respaldar el original: ${backupError.message}`);
+
+  const { error: updateError } = await supabase.storage
+    .from(img.bucket_id)
+    .update(img.storage_path, small.blob, { contentType: 'image/jpeg', cacheControl: '31536000' });
+  if (updateError) throw new Error(`no se pudo reemplazar: ${updateError.message}`);
+
+  const patch = { width: small.width, height: small.height, byte_size: small.blob.size };
+  const { error: rowError } = await supabase.from('card_images').update(patch).eq('id', img.id);
+  if (rowError) throw new Error(`archivo reducido, pero no se actualizaron las medidas: ${rowError.message}`);
+
+  return { ...patch, before: data.size };
+}
