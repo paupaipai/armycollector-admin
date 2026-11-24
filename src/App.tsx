@@ -224,7 +224,7 @@ export default function App() {
         <div className={tab !== 'cards' ? 'hidden' : ''}><CardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} cards={cards} cardImages={cardImages} collectionTypes={collectionTypes} albumEras={albumEras} onChanged={loadData} /></div>
         <div className={tab !== 'bulk' ? 'hidden' : ''}><BulkCardsPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} collectionTypes={collectionTypes} albumEras={albumEras} importedFiles={importedCropFiles} onChanged={loadData} /></div>
         {/* Se montan solo al abrirse: cargan sus propios datos (bandejas, ranking). */}
-        {tab === 'moderation' && <ModerationPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} cards={cards} cardImages={cardImages} onChanged={loadData} />}
+        {tab === 'moderation' && <ModerationPanel albums={albums} versions={versions} categories={categories} cardSets={cardSets} cards={cards} cardImages={cardImages} collectionTypes={collectionTypes} onChanged={loadData} />}
         {tab === 'challenge' && <ChallengePanel cards={cards} albums={albums} />}
         <div className={tab !== 'cropper' ? 'hidden' : ''}><CropperPanel onSendToBulk={(files) => { setImportedCropFiles(files); setTab('bulk'); }} /></div>
       </section>

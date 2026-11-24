@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Ban, Check, Crop, Flag, ImageUp, Inbox, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { Ban, Check, Crop, Filter, Flag, ImageUp, Inbox, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
   CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, moderateCardImage, moderateCardSubmission, signedReviewUrls,
 } from '../lib/cardImages';
 import type {
-  Album, AlbumVersion, Card, CardCategory, CardImage, CardSet, CardSubmission, ImageReport, ReportStatus,
+  Album, AlbumVersion, Card, CardCategory, CardImage, CardSet, CardSubmission, CollectionType, ImageReport, ReportStatus,
 } from '../types';
+import { BTS_MEMBERS } from '../data/members';
 import { ImageAdjustModal, type AdjustResult } from './ImageAdjustModal';
 
 type Props = {
@@ -17,6 +18,7 @@ type Props = {
   cardSets: CardSet[];
   cards: Card[];
   cardImages: CardImage[];
+  collectionTypes: CollectionType[];
   onChanged: () => Promise<void>;
 };
 
@@ -53,6 +55,48 @@ function fmtDate(iso: string | null | undefined) {
   return new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+// ---------------------------------------------------------------------------
+// Filtros por card (tipo, álbum, versión, categoría, miembro, lado)
+// ---------------------------------------------------------------------------
+
+type Filters = {
+  typeId: string;
+  albumId: string;
+  versionId: string;
+  categoryId: string;
+  member: string;
+  side: '' | 'front' | 'back';
+};
+
+const EMPTY_FILTERS: Filters = { typeId: '', albumId: '', versionId: '', categoryId: '', member: '', side: '' };
+
+const MEMBER_ORDER = [...BTS_MEMBERS.map((m) => m.member as string), 'Group'];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyQuery = any;
+
+/**
+ * Aplica los filtros de card a una consulta. `cardPrefix` es la ruta al embed
+ * de cards ('cards.' para card_images, 'card_images.cards.' para reportes, ''
+ * para card_submissions, que tiene las columnas propias). `sidePrefix` igual
+ * para la columna side; null si la tabla no tiene lado.
+ */
+function applyFilters(q: AnyQuery, f: Filters, typeAlbumIds: number[] | null, cardPrefix: string, sidePrefix: string | null): AnyQuery {
+  if (f.albumId) q = q.eq(`${cardPrefix}album_id`, Number(f.albumId));
+  // Las propuestas tienen su propio collection_type_id (y pueden no tener álbum si es no listado).
+  else if (f.typeId && cardPrefix === '') q = q.eq('collection_type_id', Number(f.typeId));
+  else if (typeAlbumIds) q = q.in(`${cardPrefix}album_id`, typeAlbumIds.length ? typeAlbumIds : [-1]);
+  if (f.versionId) q = q.eq(`${cardPrefix}version_id`, Number(f.versionId));
+  if (f.categoryId) q = q.eq(`${cardPrefix}category_id`, Number(f.categoryId));
+  if (f.member) q = q.eq(`${cardPrefix}member`, f.member);
+  if (f.side && sidePrefix !== null) q = q.eq(`${sidePrefix}side`, f.side);
+  return q;
+}
+
+function activeFilterCount(f: Filters) {
+  return Object.values(f).filter(Boolean).length;
+}
+
 /** Pide un motivo (obligatorio) antes de una acción destructiva. */
 type ReasonPrompt = {
   title: string;
@@ -64,8 +108,9 @@ type ReasonPrompt = {
   run: (reason: string) => Promise<void>;
 };
 
-export function ModerationPanel({ albums, versions, categories, cardSets, cards, cardImages, onChanged }: Props) {
+export function ModerationPanel({ albums, versions, categories, cardSets, cards, cardImages, collectionTypes, onChanged }: Props) {
   const [section, setSection] = useState<Section>('images');
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [counts, setCounts] = useState({ images: 0, reports: 0, submissions: 0 });
   const [prompt, setPrompt] = useState<ReasonPrompt | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -75,6 +120,12 @@ export function ModerationPanel({ albums, versions, categories, cardSets, cards,
   const versionsById = useMemo(() => new Map(versions.map((v) => [v.id, v])), [versions]);
   const categoriesById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const setsById = useMemo(() => new Map(cardSets.map((s) => [s.id, s])), [cardSets]);
+
+  /** Álbumes del tipo elegido (solo se usa si no hay un álbum puntual). */
+  const typeAlbumIds = useMemo(
+    () => (filters.typeId ? albums.filter((a) => String(a.collection_type_id) === filters.typeId).map((a) => a.id) : null),
+    [albums, filters.typeId],
+  );
 
   /** Imagen publicada hoy por card y lado, para comparar con el aporte. */
   const currentByCardSide = useMemo(() => {
@@ -91,12 +142,21 @@ export function ModerationPanel({ albums, versions, categories, cardSets, cards,
 
   const refreshCounts = useCallback(async () => {
     const [img, rep, sub] = await Promise.all([
-      supabase.from('card_images').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('image_reports').select('id', { count: 'exact', head: true }).eq('status', 'open'),
-      supabase.from('card_submissions').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      applyFilters(
+        supabase.from('card_images').select('id, cards!inner(id)', { count: 'exact', head: true }).eq('status', 'pending'),
+        filters, typeAlbumIds, 'cards.', '',
+      ),
+      applyFilters(
+        supabase.from('image_reports').select('id, card_images!inner(id, cards!inner(id))', { count: 'exact', head: true }).eq('status', 'open'),
+        filters, typeAlbumIds, 'card_images.cards.', 'card_images.',
+      ),
+      applyFilters(
+        supabase.from('card_submissions').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+        filters, typeAlbumIds, '', null,
+      ),
     ]);
     setCounts({ images: img.count ?? 0, reports: rep.count ?? 0, submissions: sub.count ?? 0 });
-  }, []);
+  }, [filters, typeAlbumIds]);
 
   useEffect(() => { void refreshCounts(); }, [refreshCounts]);
 
@@ -112,7 +172,7 @@ export function ModerationPanel({ albums, versions, categories, cardSets, cards,
     await Promise.all([refreshCounts(), onChanged()]);
   }
 
-  const shared = { cardsById, albumsById, versionsById, categoriesById, setsById, currentByCardSide, cardLabel, setPrompt, setNotice, afterAction };
+  const shared = { cardsById, albumsById, versionsById, categoriesById, setsById, currentByCardSide, cardLabel, setPrompt, setNotice, afterAction, filters, typeAlbumIds };
 
   return (
     <div className="admin-card p-6 min-w-0 space-y-4">
@@ -124,6 +184,17 @@ export function ModerationPanel({ albums, versions, categories, cardSets, cards,
           <SectionButton active={section === 'submissions'} onClick={() => setSection('submissions')} icon={<Inbox size={14} />} label="Propuestas" count={counts.submissions} />
         </div>
       </div>
+
+      <FilterBar
+        filters={filters}
+        setFilters={setFilters}
+        albums={albums}
+        versions={versions}
+        categories={categories}
+        cards={cards}
+        collectionTypes={collectionTypes}
+        showSide={section !== 'submissions'}
+      />
 
       {notice && (
         <div className={`rounded-2xl px-4 py-3 text-sm flex items-start justify-between gap-3 ${notice.kind === 'ok' ? 'bg-emerald-500/15 text-emerald-100' : 'bg-red-500/15 text-red-100'}`}>
@@ -152,13 +223,15 @@ type Shared = {
   setPrompt: (p: ReasonPrompt | null) => void;
   setNotice: (n: { kind: 'ok' | 'error'; text: string } | null) => void;
   afterAction: (text: string) => Promise<void>;
+  filters: Filters;
+  typeAlbumIds: number[] | null;
 };
 
 // ---------------------------------------------------------------------------
 // Imágenes pendientes (aportes de la comunidad)
 // ---------------------------------------------------------------------------
 
-function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, setNotice, afterAction }: Shared) {
+function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, setNotice, afterAction, filters, typeAlbumIds }: Shared) {
   const [rows, setRows] = useState<CardImage[]>([]);
   const [urls, setUrls] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -172,11 +245,12 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
     try {
       let q = supabase
         .from('card_images')
-        .select(CARD_IMAGE_COLUMNS)
+        .select(`${CARD_IMAGE_COLUMNS}, cards!inner(id)`)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (handleFilter.trim()) q = q.ilike('contributor_handle', `%${handleFilter.trim()}%`);
+      q = applyFilters(q, filters, typeAlbumIds, 'cards.', '');
       const { data, error } = await q;
       if (error) throw error;
       const page = (data || []) as unknown as CardImage[];
@@ -189,7 +263,7 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
     } finally {
       setLoading(false);
     }
-  }, [handleFilter, setNotice]);
+  }, [handleFilter, setNotice, filters, typeAlbumIds]);
 
   useEffect(() => { void load(0); }, [load]);
 
@@ -305,7 +379,7 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
 // Reportes de imágenes
 // ---------------------------------------------------------------------------
 
-function Reports({ cardsById, cardLabel, setPrompt, setNotice, afterAction }: Shared) {
+function Reports({ cardsById, cardLabel, setPrompt, setNotice, afterAction, filters, typeAlbumIds }: Shared) {
   const [status, setStatus] = useState<ReportStatus | ''>('open');
   const [rows, setRows] = useState<ImageReport[]>([]);
   const [loading, setLoading] = useState(false);
@@ -315,10 +389,11 @@ function Reports({ cardsById, cardLabel, setPrompt, setNotice, afterAction }: Sh
     try {
       let q = supabase
         .from('image_reports')
-        .select(`*, card_images(${CARD_IMAGE_COLUMNS})`)
+        .select(`*, card_images!inner(${CARD_IMAGE_COLUMNS}, cards!inner(id))`)
         .order('created_at', { ascending: status === 'open' })
         .limit(200);
       if (status) q = q.eq('status', status);
+      q = applyFilters(q, filters, typeAlbumIds, 'card_images.cards.', 'card_images.');
       const { data, error } = await q;
       if (error) throw error;
       setRows((data || []) as unknown as ImageReport[]);
@@ -327,7 +402,7 @@ function Reports({ cardsById, cardLabel, setPrompt, setNotice, afterAction }: Sh
     } finally {
       setLoading(false);
     }
-  }, [status, setNotice]);
+  }, [status, setNotice, filters, typeAlbumIds]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -452,7 +527,7 @@ function Reports({ cardsById, cardLabel, setPrompt, setNotice, afterAction }: Sh
 // Propuestas de cards nuevas
 // ---------------------------------------------------------------------------
 
-function Submissions({ albumsById, versionsById, categoriesById, setsById, setPrompt, setNotice, afterAction }: Shared) {
+function Submissions({ albumsById, versionsById, categoriesById, setsById, setPrompt, setNotice, afterAction, filters, typeAlbumIds }: Shared) {
   const [status, setStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [rows, setRows] = useState<CardSubmission[]>([]);
   const [urls, setUrls] = useState<Map<string, string>>(new Map());
@@ -462,12 +537,15 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('card_submissions')
-        .select('*')
-        .eq('status', status)
-        .order('created_at', { ascending: status === 'pending' })
-        .limit(100);
+      const { data, error } = await applyFilters(
+        supabase
+          .from('card_submissions')
+          .select('*')
+          .eq('status', status)
+          .order('created_at', { ascending: status === 'pending' })
+          .limit(100),
+        filters, typeAlbumIds, '', null,
+      );
       if (error) throw error;
       const list = (data || []) as CardSubmission[];
       const reviewPaths = list
@@ -482,7 +560,7 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
     } finally {
       setLoading(false);
     }
-  }, [status, setNotice]);
+  }, [status, setNotice, filters, typeAlbumIds]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -589,6 +667,85 @@ function Submissions({ albumsById, versionsById, categoriesById, setsById, setPr
 // ---------------------------------------------------------------------------
 // Piezas compartidas
 // ---------------------------------------------------------------------------
+
+function FilterBar({ filters, setFilters, albums, versions, categories, cards, collectionTypes, showSide }: {
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+  albums: Album[];
+  versions: AlbumVersion[];
+  categories: CardCategory[];
+  cards: Card[];
+  collectionTypes: CollectionType[];
+  showSide: boolean;
+}) {
+  const albumOptions = useMemo(
+    () => albums
+      .filter((a) => !filters.typeId || String(a.collection_type_id) === filters.typeId)
+      .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999) || a.name.localeCompare(b.name)),
+    [albums, filters.typeId],
+  );
+  const versionOptions = useMemo(
+    () => versions.filter((v) => String(v.album_id) === filters.albumId).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [versions, filters.albumId],
+  );
+  const memberOptions = useMemo(() => {
+    const set = new Set(cards.filter((c) => !filters.albumId || String(c.album_id) === filters.albumId).map((c) => c.member));
+    const rank = (m: string) => (MEMBER_ORDER.indexOf(m) === -1 ? 99 : MEMBER_ORDER.indexOf(m));
+    return Array.from(set).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  }, [cards, filters.albumId]);
+
+  function set<K extends keyof Filters>(key: K, value: Filters[K]) {
+    const next = { ...filters, [key]: value };
+    if (key === 'typeId') { next.albumId = ''; next.versionId = ''; }
+    if (key === 'albumId') next.versionId = '';
+    setFilters(next);
+  }
+
+  const active = activeFilterCount(filters);
+  const sel = 'input !mt-0 !py-2 text-sm';
+
+  return (
+    <div className="rounded-2xl border border-violet-200/15 bg-white/5 p-3 space-y-2">
+      <div className="flex items-center gap-2 text-xs font-bold text-violet-100/80">
+        <Filter size={13} /> Filtros
+        {active > 0 && (
+          <button className="ml-auto icon-btn !py-1 text-xs" onClick={() => setFilters(EMPTY_FILTERS)}>
+            <X size={12} /> Limpiar ({active})
+          </button>
+        )}
+      </div>
+      <div className="grid gap-2 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+        <select className={sel} value={filters.typeId} onChange={(e) => set('typeId', e.target.value)}>
+          <option value="">Todos los tipos</option>
+          {collectionTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <select className={sel} value={filters.albumId} onChange={(e) => set('albumId', e.target.value)}>
+          <option value="">Todos los álbumes</option>
+          {albumOptions.map((a) => <option key={a.id} value={a.id}>{a.short_name ? `${a.short_name} · ${a.name}` : a.name}</option>)}
+        </select>
+        <select className={sel} value={filters.versionId} onChange={(e) => set('versionId', e.target.value)} disabled={!filters.albumId}>
+          <option value="">{filters.albumId ? 'Todas las versiones' : 'Versión (elige álbum)'}</option>
+          {versionOptions.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </select>
+        <select className={sel} value={filters.categoryId} onChange={(e) => set('categoryId', e.target.value)}>
+          <option value="">Todas las categorías</option>
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select className={sel} value={filters.member} onChange={(e) => set('member', e.target.value)}>
+          <option value="">Todos los miembros</option>
+          {memberOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {showSide && (
+          <select className={sel} value={filters.side} onChange={(e) => set('side', e.target.value as Filters['side'])}>
+            <option value="">Frente y reverso</option>
+            <option value="front">Solo frente</option>
+            <option value="back">Solo reverso</option>
+          </select>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function Thumb({ label, url, emptyText = 'Sin imagen' }: { label: string; url: string | null; emptyText?: string }) {
   return (
