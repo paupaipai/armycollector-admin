@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Ban, Check, Crop, Filter, Flag, ImageUp, Inbox, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { Ban, Check, Crop, Filter, Flag, ImageUp, Inbox, Loader2, RefreshCw, Replace, ShieldCheck, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
   ADJUST_MAX_WIDTH, CARD_IMAGE_COLUMNS, REVIEW_BUCKET, adjustPendingImage, imageUrlFor, outputTypeForPath, overwriteReviewImage,
   shrinkApprovedImage, shrinkReviewImage, COMMUNITY_BUCKET, moderateCardImage, moderateCardSubmission, signedReviewUrls,
+  previousRestorable, restoreCardImage, type ApproveMode,
 } from '../lib/cardImages';
 import type {
   Album, AlbumVersion, Card, CardCategory, CardImage, CardSet, CardSubmission, CollectionType, ImageReport, ReportStatus,
@@ -30,7 +31,11 @@ const PAGE = 24;
 const REJECT_PRESETS = [
   'No corresponde a esta card',
   'Imagen de baja calidad o borrosa',
+  'No mejora la imagen actual',
   'Imagen duplicada',
+  'No muestra la photocard completa',
+  'Reflejos o sombras que dificultan verla',
+  'Mal orientada o mal recortada',
   'Tiene marca de agua o texto encima',
   'Contenido inapropiado',
 ];
@@ -270,7 +275,14 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
 
   useEffect(() => { void load(0); }, [load]);
 
-  async function approve(img: CardImage) {
+  /** La imagen community vigente de ese lado: es la que tiene los 0,5 puntos. */
+  function communityCurrent(img: CardImage) {
+    const cur = currentByCardSide.get(`${img.card_id}:${img.side}`);
+    return cur && cur.source_type === 'community' ? cur : null;
+  }
+
+  async function approve(img: CardImage, mode: ApproveMode, note?: string) {
+    if (busyId != null) return; // un clic a la vez: el doble clic dejó la card 2186 sin reverso
     setBusyId(img.id);
     try {
       // Se publica en máx. 400 px: si el aporte es más grande se reduce antes.
@@ -278,14 +290,34 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
         const small = await shrinkReviewImage(img.storage_path);
         if (small) img = { ...img, ...(await adjustPendingImage(img, small.blob, small.width, small.height)) };
       }
-      await moderateCardImage({ action: 'approve', cardImageId: img.id });
+      await moderateCardImage({ action: 'approve', cardImageId: img.id, mode, note });
       setRows((r) => r.filter((x) => x.id !== img.id));
-      await afterAction(`Aprobada: ${cardLabel(img.card_id)} (${img.side === 'back' ? 'reverso' : 'frente'}).`);
+      const side = img.side === 'back' ? 'reverso' : 'frente';
+      await afterAction(mode === 'replace'
+        ? `Reemplazo por calidad aprobado: ${cardLabel(img.card_id)} (${side}). Los 0,5 puntos pasan a @${img.contributor_handle || 'sin usuario'}.`
+        : `Aprobado como nuevo aporte: ${cardLabel(img.card_id)} (${side}).`);
     } catch (err) {
       setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'No se pudo aprobar' });
     } finally {
       setBusyId(null);
     }
+  }
+
+  function approveReplace(img: CardImage) {
+    const cur = communityCurrent(img);
+    const own = cur && cur.contributed_by === img.contributed_by;
+    setPrompt({
+      title: 'Aprobar reemplazo por calidad',
+      description: own
+        ? `@${img.contributor_handle || 'sin usuario'} mejora su propia imagen: conserva sus 0,5 puntos, no suma más.`
+        : `La nueva pasa a ser la imagen vigente y los 0,5 puntos de este lado pasan de @${cur?.contributor_handle || 'sin usuario'} a @${img.contributor_handle || 'sin usuario'}. ` +
+          'Úsalo solo si es claramente mejor; si es equivalente, rechaza con "No mejora la imagen actual".',
+      confirmLabel: 'Aprobar reemplazo',
+      presets: ['Más nítida', 'Mejor resolución', 'Sin reflejos', 'Mejor recorte', 'Colores más fieles'],
+      run: async (note) => {
+        await approve(img, 'replace', note);
+      },
+    });
   }
 
   /** Guarda el re-encuadre (y opcionalmente aprueba). Lanza para que el modal muestre el error. */
@@ -295,7 +327,8 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
     setUrls((prev) => new Map(prev).set(patch.storage_path, URL.createObjectURL(result.blob)));
     setRows((r) => r.map((x) => (x.id === img.id ? updated : x)));
     if (andApprove) {
-      await approve(updated);
+      if (communityCurrent(img)) approveReplace(updated);
+      else await approve(updated, 'new');
     } else {
       setNotice({ kind: 'ok', text: `Encuadre ajustado: ${cardLabel(img.card_id)} (${result.width}×${result.height}).` });
     }
@@ -321,7 +354,11 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
       <div className="flex flex-wrap gap-3 items-center">
         <input className="input max-w-xs !mt-0" placeholder="Filtrar por @usuario" value={handleFilter} onChange={(e) => setHandleFilter(e.target.value)} />
         <button className="btn-secondary" onClick={() => load(0)} disabled={loading}><RefreshCw size={14} /> Recargar</button>
-        <p className="text-xs text-violet-100/60">Se muestran las más antiguas primero. Aprobar reduce la imagen a máx. 400×600 (JPEG 85 %), la mueve al bucket público y la deja como imagen principal de la card.</p>
+        <p className="text-xs text-violet-100/60">
+          Se muestran las más antiguas primero. Aprobar reduce la imagen a máx. 400×600 (JPEG 85 %) y la publica como imagen vigente.
+          Si el lado ya tiene imagen de la comunidad, solo se aprueba como <b>reemplazo por calidad</b> (los 0,5 puntos cambian de dueña); si no es claramente mejor, se rechaza.
+          No apruebes imágenes de baja calidad solo porque el lado está vacío.
+        </p>
       </div>
 
       <ShrinkApproved setNotice={setNotice} />
@@ -334,6 +371,8 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
           const current = currentByCardSide.get(`${img.card_id}:${img.side}`);
           const currentUrl = current ? imageUrlFor(current) : null;
           const pendingUrl = urls.get(img.storage_path) ?? null;
+          const isReplace = current?.source_type === 'community';
+          const busy = busyId != null;
           return (
             <div key={img.id} className="rounded-3xl border border-violet-200/15 bg-white/5 p-4 space-y-3">
               <div>
@@ -344,18 +383,35 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
                   {img.width && img.height ? ` · ${img.width}×${img.height}` : ''}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Thumb label={current ? `Actual (${current.source_type})` : 'Actual: sin imagen'} url={currentUrl} />
-                <Thumb label="Nueva (aporte)" url={pendingUrl} />
+              <div className={`rounded-lg px-2 py-1 text-[11px] font-bold ${isReplace ? 'bg-amber-500/20 text-amber-100' : 'bg-emerald-500/15 text-emerald-100'}`}>
+                {isReplace
+                  ? `Posible reemplazo: el lado ya tiene imagen de @${current?.contributor_handle || 'sin usuario'}${current?.contributed_by === img.contributed_by ? ' (la misma persona)' : ''}`
+                  : 'Nuevo aporte: completa un lado sin imagen de la comunidad'}
               </div>
-              <div className="flex gap-2">
-                <button className="btn-secondary !py-2" disabled={busyId === img.id} onClick={() => setAdjusting(img)} title="Ajustar encuadre">
+              <div className="grid grid-cols-2 gap-2">
+                <Thumb
+                  label={current ? `Vigente (${current.source_type}${current.width ? ` · ${current.width}×${current.height}` : ''}${current.byte_size ? ` · ${Math.round(current.byte_size / 1024)} kB` : ''})` : 'Vigente: sin imagen'}
+                  url={currentUrl}
+                />
+                <Thumb
+                  label={`Nueva${img.width ? ` · ${img.width}×${img.height}` : ''}${img.byte_size ? ` · ${Math.round(img.byte_size / 1024)} kB` : ''}`}
+                  url={pendingUrl}
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <button className="btn-secondary !py-2" disabled={busy} onClick={() => setAdjusting(img)} title="Ajustar encuadre">
                   <Crop size={15} /> Ajustar
                 </button>
-                <button className="flex-1 btn-primary !py-2 disabled:opacity-60" disabled={busyId === img.id} onClick={() => approve(img)}>
-                  {busyId === img.id ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Aprobar
-                </button>
-                <button className="flex-1 btn-secondary text-red-200" disabled={busyId === img.id} onClick={() => reject(img)}>
+                {isReplace ? (
+                  <button className="flex-1 btn-primary !py-2 disabled:opacity-60" disabled={busy} onClick={() => approveReplace(img)} title="Solo si es claramente mejor que la vigente">
+                    {busyId === img.id ? <Loader2 size={15} className="animate-spin" /> : <Replace size={15} />} Reemplazo por calidad
+                  </button>
+                ) : (
+                  <button className="flex-1 btn-primary !py-2 disabled:opacity-60" disabled={busy} onClick={() => approve(img, 'new')}>
+                    {busyId === img.id ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Aprobar nuevo aporte
+                  </button>
+                )}
+                <button className="flex-1 btn-secondary text-red-200" disabled={busy} onClick={() => reject(img)}>
                   <X size={15} /> Rechazar
                 </button>
               </div>
@@ -375,7 +431,8 @@ function PendingImages({ cardsById, currentByCardSide, cardLabel, setPrompt, set
             subtitle={`${adjusting.side === 'back' ? 'Reverso' : 'Frente'} · @${adjusting.contributor_handle || 'sin usuario'}`}
             storagePath={adjusting.storage_path}
             currentUrl={current ? imageUrlFor(current) : null}
-            currentLabel={current ? `Actual (${current.source_type})` : 'Actual: sin imagen'}
+            currentLabel={current ? `Vigente (${current.source_type})` : 'Vigente: sin imagen'}
+            approveLabel={current?.source_type === 'community' ? 'Guardar y reemplazar…' : 'Guardar y aprobar nuevo'}
             onClose={() => setAdjusting(null)}
             onSave={(result, andApprove) => saveAdjust(adjusting, result, andApprove)}
           />
@@ -540,6 +597,21 @@ function Reports({ cardsById, cardLabel, setPrompt, setNotice, afterAction, filt
     });
   }
 
+  function offerRestore(prev: CardImage) {
+    setPrompt({
+      title: 'Recuperar la imagen anterior',
+      description:
+        `Hay una imagen anterior válida de @${prev.contributor_handle || 'sin usuario'} para este lado (${fmtDate(prev.created_at)}). ` +
+        'Si la recuperas vuelve a ser la vigente y, si es elegible para el concurso, recupera sus 0,5 puntos. Puedes cancelar y dejar el lado vacío.',
+      confirmLabel: 'Recuperar',
+      presets: ['La imagen retirada no era válida'],
+      run: async (reason) => {
+        await restoreCardImage(prev.id, reason);
+        await afterAction(`Imagen anterior recuperada: ${cardLabel(prev.card_id)}.`);
+      },
+    });
+  }
+
   function takedown(report: ImageReport) {
     const img = report.card_images;
     if (!img) return;
@@ -555,6 +627,11 @@ function Reports({ cardsById, cardLabel, setPrompt, setNotice, afterAction, filt
         await moderateCardImage({ action: 'takedown', cardImageId: img.id, reason, reportId: report.id });
         await load();
         await afterAction(`Imagen retirada: ${cardLabel(img.card_id)}.`);
+        // Si era la vigente y había una anterior válida, ofrecer recuperarla.
+        if (img.source_type === 'community' && img.is_primary) {
+          const prev = await previousRestorable(img.card_id, img.side).catch(() => null);
+          if (prev) setTimeout(() => offerRestore(prev), 0);
+        }
       },
     });
   }

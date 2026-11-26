@@ -175,13 +175,67 @@ async function invokeEdge<T>(name: string, body: Record<string, unknown>): Promi
   return data as T;
 }
 
+/**
+ * Cómo se aprueba un aporte (Community Challenge v2):
+ *  - 'new':     el lado no tiene imagen community vigente; completa el lado.
+ *  - 'replace': reemplazo por calidad; la nueva pasa a ser la vigente y los
+ *               0,5 puntos del lado pasan a quien la aportó.
+ * La edge function rechaza 'new' si el lado ya tiene imagen (side_has_image),
+ * así un aporte equivalente nunca le quita los puntos a nadie por accidente.
+ */
+export type ApproveMode = 'new' | 'replace';
+
 export type ModerateImageAction =
-  | { action: 'approve'; cardImageId: number }
+  | { action: 'approve'; cardImageId: number; mode: ApproveMode; note?: string }
   | { action: 'reject'; cardImageId: number; reason: string }
   | { action: 'takedown'; cardImageId: number; reason: string; reportId?: number };
 
-export function moderateCardImage(payload: ModerateImageAction) {
-  return invokeEdge<{ success: true; action: string; cardImageId: number; cardId?: number }>('moderate-card-image', payload);
+const MODERATION_ERRORS: Record<string, string> = {
+  already_moderated: 'Este aporte ya estaba moderado (¿doble clic?). No se cambió nada.',
+  side_has_image: 'Ese lado ya tiene una imagen vigente. Recarga y decide si es un reemplazo por calidad o se rechaza.',
+  side_empty: 'La imagen vigente de ese lado ya no está. Recarga y apruébalo como nuevo aporte.',
+};
+
+export async function moderateCardImage(payload: ModerateImageAction) {
+  try {
+    return await invokeEdge<{ success: true; action: string; cardImageId: number; cardId?: number; mode?: ApproveMode; replacedImageId?: number | null }>(
+      'moderate-card-image',
+      payload,
+    );
+  } catch (err) {
+    const code = err instanceof Error ? err.message : '';
+    throw new Error(MODERATION_ERRORS[code] ?? code);
+  }
+}
+
+/**
+ * Vuelve a dejar vigente una imagen anterior (aprobada y reemplazada) cuando la
+ * vigente se invalidó. Requiere la migración 20261126190000.
+ */
+export async function restoreCardImage(cardImageId: number, reason: string) {
+  const { error } = await supabase.rpc('moderate_restore_image', { p_image_id: cardImageId, p_reason: reason });
+  if (error) {
+    if (error.message.includes('side_has_image')) throw new Error('Ese lado ya tiene una imagen vigente.');
+    if (error.message.includes('not_restorable')) throw new Error('Esa imagen no se puede recuperar (no está aprobada o fue retirada).');
+    throw error;
+  }
+}
+
+/** La imagen anterior más reciente de ese lado que se podría recuperar. */
+export async function previousRestorable(cardId: number, side: string): Promise<CardImage | null> {
+  const { data, error } = await supabase
+    .from('card_images')
+    .select(CARD_IMAGE_COLUMNS)
+    .eq('card_id', cardId)
+    .eq('side', side)
+    .eq('source_type', 'community')
+    .eq('status', 'approved')
+    .eq('is_primary', false)
+    .is('taken_down_at', null)
+    .order('reviewed_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return ((data || [])[0] as unknown as CardImage) ?? null;
 }
 
 export type ModerateSubmissionAction =
